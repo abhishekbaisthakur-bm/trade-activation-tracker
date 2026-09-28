@@ -1,0 +1,38 @@
+# One command deployment: docker compose up -d
+# Postgres, the API and the built front end all run on your own server.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
+      POSTGRES_DB: tat
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: ./server/.env
+    environment:
+      DATABASE_URL: postgres://tat:${POSTGRES_PASSWORD:-change_this_password}@db:5432/tat
+      UPLOAD_DIR: /var/lib/tat/uploads
+    volumes:
+      # Photo storage. Point this at a disk with room to grow, or switch
+      # STORAGE_DRIVER to s3 in server/.env and drop this volume.
+      - photo_data:/var/lib/tat/uploads
+    ports:
+      - "4000:4000"
+
+volumes:
+  db_data:
+  photo_data:

@@ -1,0 +1,703 @@
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  LayoutDashboard, BarChart3, FileText, Target, Users, LogOut, Store, Download, Upload,
+  Search, Plus, Loader2, CheckCircle2, XCircle, Image as ImageIcon, ClipboardCheck,
+  ChevronDown, ChevronUp, Clock,
+} from "lucide-react";
+import { api } from "./api";
+import {
+  APP_NAME, BRAND_LINE, ASSETS, assetLabel, inputCls, Field, TextInput, Select, Button, Card,
+  Banner, Modal, MiniMap, PenTable, PenCell, AdminOverview, AdminAnalytics, fmtDate, fmtTime,
+  statusTone,
+} from "./ui";
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const daysAgoStr = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+
+/* ------------------------------- filters -------------------------------- */
+
+function FilterBar({ geo, users, f, setF }) {
+  const upd = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-7">
+      <input type="date" value={f.from} onChange={(e) => upd("from", e.target.value)} className={inputCls} />
+      <input type="date" value={f.to} onChange={(e) => upd("to", e.target.value)} className={inputCls} />
+      <Select value={f.state} onChange={(v) => setF((p) => ({ ...p, state: v, city: "", area: "" }))} options={geo.states} placeholder="All states" />
+      <Select value={f.city} onChange={(v) => setF((p) => ({ ...p, city: v, area: "" }))} options={geo.cities(f.state)} placeholder="All cities" />
+      <Select value={f.area} onChange={(v) => upd("area", v)} options={geo.areas(f.city, f.state)} placeholder="All areas" />
+      <select value={f.userId} onChange={(e) => upd("userId", e.target.value)} className={inputCls}>
+        <option value="">All salespeople</option>
+        {users.filter((u) => u.role === "field").map((u) => (
+          <option key={u.id} value={u.id}>{u.name}</option>
+        ))}
+      </select>
+      <select value={f.asset} onChange={(e) => upd("asset", e.target.value)} className={inputCls}>
+        <option value="">All assets</option>
+        {ASSETS.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
+/* ---------------------------- record detail ----------------------------- */
+
+function RecordDetail({ id, onClose }) {
+  const [record, setRecord] = useState(null);
+  const [photos, setPhotos] = useState({});
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let urls = [];
+    let live = true;
+    api.activation(id)
+      .then(async ({ activation }) => {
+        if (!live) return;
+        setRecord(activation);
+        for (const a of activation.assets) {
+          if (!a.photo_id) continue;
+          try {
+            const url = await api.photoUrl(id, a.asset_type);
+            urls.push(url);
+            if (live) setPhotos((p) => ({ ...p, [a.asset_type]: url }));
+          } catch (e) { /* photo missing from storage, tile shows the gap */ }
+        }
+      })
+      .catch((e) => setError(e.message));
+    return () => { live = false; urls.forEach((u) => URL.revokeObjectURL(u)); };
+  }, [id]);
+
+  const Row = ({ label, value }) => (
+    <div className="flex justify-between gap-4 py-1.5 text-sm">
+      <span className="text-slate-500">{label}</span>
+      <span className="text-right font-medium text-slate-900">{value}</span>
+    </div>
+  );
+
+  return (
+    <Modal title={record ? record.code : "Loading"} onClose={onClose} wide>
+      {error ? <Banner kind="error">{error}</Banner> : null}
+      {!record ? (
+        <div className="flex justify-center py-10 text-slate-400"><Loader2 className="animate-spin" /></div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div>
+            <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-4 py-2">
+              <Row label="Salesperson" value={record.user_name} />
+              <Row label="Employee ID" value={record.employee_id} />
+              <Row label="Date and time" value={`${fmtDate(record.occurred_at)} ${fmtTime(record.occurred_at)}`} />
+              <Row label="Pharmacy" value={record.pharmacy_name} />
+              <Row label="Address" value={record.address || record.geo_address || "-"} />
+              <Row label="Area" value={record.area} />
+              <Row label="City" value={record.city} />
+              <Row label="State" value={record.state} />
+              <Row label="Latitude" value={record.latitude} />
+              <Row label="Longitude" value={record.longitude} />
+              <Row label="GPS accuracy" value={record.gps_accuracy ? `${record.gps_accuracy} m` : "not reported"} />
+              <Row label="Status" value={<span className={`rounded-full border px-2 py-0.5 text-xs ${statusTone(record.status)}`}>{record.status}</span>} />
+            </div>
+
+            {record.gps_source !== "device" ? (
+              <div className="mt-3"><Banner kind="warn">Coordinates were typed in by the user, not read from the device GPS.</Banner></div>
+            ) : null}
+            {record.duplicate_override ? (
+              <div className="mt-3"><Banner kind="warn">Submitted as a repeat visit to this shop on the same day.</Banner></div>
+            ) : null}
+
+            <div className="mt-3"><MiniMap lat={record.latitude} lng={record.longitude} /></div>
+
+          </div>
+
+          <div>
+            <h4 className="mb-2 text-sm font-semibold text-slate-900">Assets and photo proof</h4>
+            <div className="grid grid-cols-2 gap-3">
+              {record.assets.map((x) => (
+                <div key={x.asset_type} className="overflow-hidden rounded-lg border border-slate-200">
+                  {photos[x.asset_type] ? (
+                    <img src={photos[x.asset_type]} alt={`${assetLabel(x.asset_type)} proof`} className="h-32 w-full object-cover" />
+                  ) : (
+                    <div className="flex h-32 flex-col items-center justify-center gap-1 bg-slate-50 text-slate-400">
+                      {x.photo_id ? <Loader2 size={18} className="animate-spin" /> : <ImageIcon size={18} />}
+                      {!x.photo_id ? <span className="px-2 text-center text-xs">No photo (distributed item)</span> : null}
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between px-2 py-1.5 text-xs">
+                    <span className="font-medium text-slate-800">{assetLabel(x.asset_type)}</span>
+                    <span className="tabular-nums text-slate-500">Qty {x.quantity}</span>
+                  </div>
+                  <div className="border-t border-slate-100 px-2 py-1 text-xs text-slate-400">
+                    {x.captured_at ? `${fmtDate(x.captured_at)} ${fmtTime(x.captured_at)}` : "-"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/* ------------------------------- records -------------------------------- */
+
+function AdminRecords({ filters, refreshKey }) {
+  const [search, setSearch] = useState("");
+  const [data, setData] = useState({ activations: [], total: 0 });
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(null);
+  const [error, setError] = useState("");
+  const limit = 50;
+
+  useEffect(() => { setOffset(0); }, [filters, search]);
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    const t = setTimeout(() => {
+      api.activations({ ...filters, search, limit, offset })
+        .then((r) => { if (live) { setData(r); setError(""); } })
+        .catch((e) => live && setError(e.message))
+        .finally(() => live && setLoading(false));
+    }, search ? 300 : 0);
+    return () => { live = false; clearTimeout(t); };
+  }, [filters, search, offset, refreshKey]);
+
+  return (
+    <div className="space-y-3">
+      <div className="relative">
+        <Search size={16} className="absolute left-3 top-3 text-slate-400" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by activation ID, shop, city or salesperson" className={inputCls + " pl-9"} />
+      </div>
+      {error ? <Banner kind="error">{error}</Banner> : null}
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs text-slate-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">Activation ID</th>
+                <th className="px-4 py-2 font-medium">Date</th>
+                <th className="px-4 py-2 font-medium">Shop</th>
+                <th className="px-4 py-2 font-medium">City</th>
+                <th className="px-4 py-2 font-medium">Salesperson</th>
+                <th className="px-4 py-2 text-right font-medium">Units</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.activations.map((a) => (
+                <tr key={a.id} onClick={() => setOpen(a.id)} className="cursor-pointer hover:bg-teal-50">
+                  <td className="px-4 py-2.5 font-mono text-xs text-slate-700">{a.code}</td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(a.occurred_at)}</td>
+                  <td className="px-4 py-2.5">{a.pharmacy_name}</td>
+                  <td className="px-4 py-2.5">{a.city}</td>
+                  <td className="px-4 py-2.5">{a.user_name}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{a.units}</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`rounded-full border px-2 py-0.5 text-xs ${statusTone(a.status)}`}>{a.status}</span>
+                  </td>
+                </tr>
+              ))}
+              {!data.activations.length && !loading ? (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">No activation records match these filters.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      <div className="flex items-center justify-between text-sm text-slate-600">
+        <span>{loading ? "Loading" : `${data.total.toLocaleString("en-IN")} records`}</span>
+        <div className="flex gap-2">
+          <Button variant="ghost" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Previous</Button>
+          <Button variant="ghost" size="sm" disabled={offset + limit >= data.total} onClick={() => setOffset(offset + limit)}>Next</Button>
+        </div>
+      </div>
+      {open ? <RecordDetail id={open} onClose={() => setOpen(null)} /> : null}
+    </div>
+  );
+}
+
+/* ---------------------------- plan vs actual ---------------------------- */
+
+const PLAN_HEADERS = ["State", "City", "Area", "Planned Shops"].concat(ASSETS.map((a) => a.label));
+
+function AdminPlan({ a, planCount, filters, onPlansChanged }) {
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = React.useRef(null);
+
+  const upload = async (file) => {
+    setBusy(true);
+    try {
+      const r = await api.importPlans(file, true);
+      setMsg({ kind: "success", text: `Replaced the target file with ${r.saved} area rows.` });
+      onPlansChanged();
+    } catch (e) {
+      setMsg({ kind: "error", text: e.message });
+    } finally { setBusy(false); }
+  };
+
+  const template = () => {
+    const rows = [PLAN_HEADERS.join(","), ["Maharashtra", "Mumbai", "Andheri West", 40, 80, 120, 80, 40, 12, 8, 400].join(",")];
+    const blob = new Blob(["\ufeff" + rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement("a");
+    el.href = url; el.download = "planned-targets-template.csv";
+    document.body.appendChild(el); el.click(); document.body.removeChild(el);
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Planned targets</h3>
+            <p className="text-xs text-slate-500">
+              {planCount} area rows in the database. Uploading a new file replaces all targets and rebuilds the
+              state, city and area lists used across the app.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
+              onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) upload(f); e.target.value = ""; }} />
+            <Button variant="ghost" size="sm" onClick={template}><Download size={15} /> Template</Button>
+            <Button size="sm" disabled={busy} onClick={() => fileRef.current && fileRef.current.click()}>
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />} Upload targets
+            </Button>
+          </div>
+        </div>
+        {msg ? <div className="mt-3"><Banner kind={msg.kind}>{msg.text}</Banner></div> : null}
+      </Card>
+
+      <PenTable head="Plan vs actual by city" rows={a.byCity} cols={[
+        { label: "City", render: (r) => r.key },
+        { label: "Planned shops", right: true, render: (r) => r.plannedShops },
+        { label: "Actual activated", right: true, render: (r) => r.activatedShops },
+        { label: "Gap", right: true, render: (r) => Math.max(0, r.plannedShops - r.activatedShops) },
+        { label: "Shop penetration", right: true, render: (r) => <PenCell value={r.shopPen} /> },
+      ]} />
+
+      <PenTable head="Plan vs actual by asset" rows={a.byAsset} cols={[
+        { label: "Asset", render: (r) => r.label },
+        { label: "Planned", right: true, render: (r) => r.planned.toLocaleString("en-IN") },
+        { label: "Installed", right: true, render: (r) => r.installed.toLocaleString("en-IN") },
+        { label: "Remaining", right: true, render: (r) => r.remaining.toLocaleString("en-IN") },
+        { label: "Completion", right: true, render: (r) => <PenCell value={r.pen} /> },
+      ]} />
+
+      <Button variant="ghost" size="sm"
+        onClick={() => api.download("/analytics/export/plan-vs-actual.csv", "plan-vs-actual.csv", filters)}>
+        <Download size={15} /> Export plan vs actual
+      </Button>
+    </div>
+  );
+}
+
+/* ----------------------------- data & users ----------------------------- */
+
+const emptyUser = { name: "", employeeId: "", mobile: "", email: "", role: "field", state: "", city: "", password: "", active: true };
+
+function AdminData({ geo, users, filters, onUsersChanged }) {
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState(emptyUser);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      if (editing === "new") await api.createUser(draft);
+      else {
+        const patch = { ...draft };
+        delete patch.id;
+        if (!patch.password) delete patch.password;
+        await api.updateUser(editing, patch);
+      }
+      setEditing(null);
+      onUsersChanged();
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const deactivate = async (id) => {
+    try { await api.deactivateUser(id); onUsersChanged(); } catch (e) { setErr(e.message); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold text-slate-900">Exports</h3>
+        <p className="mb-3 text-xs text-slate-500">The activation export follows the filters set at the top of the dashboard.</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" size="sm"
+            onClick={() => api.download("/analytics/export/activations.csv", "activation-records.csv", filters)}>
+            <Download size={15} /> Activation data with photo keys
+          </Button>
+        </div>
+      </Card>
+
+      {err ? <Banner kind="error">{err}</Banner> : null}
+
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-900">Field users and managers</h3>
+          <Button size="sm" onClick={() => { setDraft(emptyUser); setEditing("new"); setErr(""); }}>
+            <Plus size={15} /> Add user
+          </Button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs text-slate-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">Name</th>
+                <th className="px-4 py-2 font-medium">Employee ID</th>
+                <th className="px-4 py-2 font-medium">Mobile</th>
+                <th className="px-4 py-2 font-medium">Role</th>
+                <th className="px-4 py-2 font-medium">Territory</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td className="px-4 py-2.5 font-medium text-slate-900">{u.name}</td>
+                  <td className="px-4 py-2.5">{u.employeeId}</td>
+                  <td className="px-4 py-2.5">{u.mobile || "-"}</td>
+                  <td className="px-4 py-2.5 capitalize">{u.role}</td>
+                  <td className="px-4 py-2.5">{[u.city, u.state].filter(Boolean).join(", ") || "PAN India"}</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`rounded-full border px-2 py-0.5 text-xs ${u.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+                      {u.active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <button onClick={() => { setDraft({ ...u, password: "" }); setEditing(u.id); setErr(""); }}
+                      className="mr-3 text-xs font-medium text-teal-700 hover:underline">Edit</button>
+                    {u.active ? (
+                      <button onClick={() => deactivate(u.id)} className="text-xs font-medium text-rose-600 hover:underline">Deactivate</button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+          Users are deactivated rather than deleted so their activation history and photo proof stay auditable.
+        </p>
+      </Card>
+
+      {editing ? (
+        <Modal title={editing === "new" ? "Add user" : "Edit user"} onClose={() => setEditing(null)}>
+          <div className="space-y-3">
+            <Field label="Name" required><TextInput value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Employee ID" required><TextInput value={draft.employeeId} onChange={(e) => setDraft({ ...draft, employeeId: e.target.value })} /></Field>
+              <Field label="Mobile"><TextInput value={draft.mobile || ""} onChange={(e) => setDraft({ ...draft, mobile: e.target.value })} /></Field>
+            </div>
+            <Field label="Email"><TextInput value={draft.email || ""} onChange={(e) => setDraft({ ...draft, email: e.target.value })} /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Role">
+                <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} className={inputCls}>
+                  <option value="field">Field user</option>
+                  <option value="manager">Manager</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </Field>
+              <Field label={editing === "new" ? "Initial password" : "Reset password"}
+                hint={editing === "new" ? "Minimum 8 characters" : "Leave blank to keep the current one"}>
+                <TextInput type="password" value={draft.password || ""} onChange={(e) => setDraft({ ...draft, password: e.target.value })} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Assigned state">
+                <Select value={draft.state || ""} onChange={(v) => setDraft({ ...draft, state: v, city: "" })} options={geo.states} placeholder="Select state" />
+              </Field>
+              <Field label="Assigned city">
+                <Select value={draft.city || ""} onChange={(v) => setDraft({ ...draft, city: v })} options={geo.cities(draft.state)} placeholder="Select city" disabled={!draft.state} />
+              </Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={draft.active !== false} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
+              Account is active
+            </label>
+            {err ? <Banner kind="error">{err}</Banner> : null}
+            <div className="flex gap-2 pt-1">
+              <Button onClick={save} disabled={busy}>{busy ? <Loader2 size={15} className="animate-spin" /> : null} Save user</Button>
+              <Button variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
+
+
+/* ------------------------------ approvals ------------------------------ */
+function AdminApprovals({ onApproved }) {
+  const [items, setItems] = useState([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
+  const load = useCallback(() => api.requests().then((r) => setItems(r.requests)).catch((e) => setError(e.message)), []);
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (id, action) => {
+    setBusy(id + action);
+    setError("");
+    try {
+      if (action === "approve") await api.approveRequest(id);
+      else await api.rejectRequest(id);
+      await load();
+      if (onApproved) onApproved();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const title = (request) => request.type === "target_change"
+    ? "Target change"
+    : request.type === "user_create"
+      ? "Field user creation (legacy)"
+      : "Field user deactivation";
+
+  const requestFields = (request) => {
+    const { password, ...payload } = request.payload || {};
+    if (request.type === "target_change") {
+      const assets = Object.entries(payload.assets || {})
+        .filter(([, quantity]) => Number(quantity) > 0)
+        .map(([asset, quantity]) => `${assetLabel(asset)}: ${quantity}`)
+        .join(", ");
+      return [
+        ["Territory", [payload.area, payload.city, payload.state].filter(Boolean).join(", ") || "—"],
+        ["Change", payload.changeType ? `${payload.changeType} target` : "—"],
+        ["Planned shops", payload.plannedShops ?? "—"],
+        ...(assets ? [["Assets", assets]] : []),
+      ];
+    }
+    if (request.type === "user_create") {
+      return [
+        ["Salesperson", payload.name || "—"],
+        ["Employee ID", payload.employeeId || "—"],
+        ["Territory", [payload.city, payload.state].filter(Boolean).join(", ") || "—"],
+      ];
+    }
+    return [["Field user reference", payload.userId || "—"]];
+  };
+
+  const RequestCard = ({ request, compact = false }) => (
+    <div className={compact ? "px-4 py-3" : "p-4"}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium text-slate-900">{title(request)}</p>
+            <span className={`rounded-full border px-2 py-0.5 text-xs capitalize ${
+              request.status === "approved"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : request.status === "rejected"
+                  ? "border-rose-200 bg-rose-50 text-rose-700"
+                  : "border-amber-200 bg-amber-50 text-amber-700"
+            }`}>{request.status}</span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            {request.requested_by_name} · {new Date(request.created_at).toLocaleString()}
+          </p>
+        </div>
+        {request.status === "pending" ? (
+          <div className="flex gap-2">
+            <Button size="sm" variant="success" disabled={!!busy} onClick={() => act(request.id, "approve")}>
+              {busy === request.id + "approve" ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Approve
+            </Button>
+            <Button size="sm" variant="danger" disabled={!!busy} onClick={() => act(request.id, "reject")}>
+              <XCircle size={14} /> Reject
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
+      <dl className={`mt-3 grid gap-x-6 gap-y-2 text-sm ${compact ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+        {requestFields(request).map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-xs text-slate-500">{label}</dt>
+            <dd className="mt-0.5 text-slate-800">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {request.reason ? <p className="mt-3 text-sm text-slate-600"><span className="font-medium text-slate-700">Reason:</span> {request.reason}</p> : null}
+      {request.review_note ? <p className="mt-1 text-xs text-slate-500">Review note: {request.review_note}</p> : null}
+    </div>
+  );
+
+  const pending = items.filter((request) => request.status === "pending");
+  const history = items.filter((request) => request.status !== "pending");
+
+  return (
+    <div className="space-y-4">
+      {error ? <Banner kind="error">{error}</Banner> : null}
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Pending approvals</h3>
+            <p className="text-xs text-slate-500">Only target changes need admin action.</p>
+          </div>
+          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">{pending.length} pending</span>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {pending.map((request) => <RequestCard key={request.id} request={request} />)}
+          {!pending.length ? (
+            <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+              <CheckCircle2 size={24} className="text-emerald-500" />
+              <p className="text-sm font-medium text-slate-700">You’re all caught up</p>
+              <p className="text-xs text-slate-500">There are no target changes waiting for approval.</p>
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <button type="button" onClick={() => setShowHistory((value) => !value)}
+          className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-slate-50">
+          <span className="flex items-center gap-2">
+            <Clock size={16} className="text-slate-400" />
+            <span>
+              <span className="block text-sm font-semibold text-slate-900">Approval history</span>
+              <span className="block text-xs text-slate-500">{history.length} completed or rejected requests</span>
+            </span>
+          </span>
+          {showHistory ? <ChevronUp size={17} className="text-slate-400" /> : <ChevronDown size={17} className="text-slate-400" />}
+        </button>
+        {showHistory ? (
+          <div className="divide-y divide-slate-100 border-t border-slate-200">
+            {history.map((request) => <RequestCard key={request.id} request={request} compact />)}
+          </div>
+        ) : null}
+      </Card>
+    </div>
+  );
+}
+
+/* -------------------------------- shell --------------------------------- */
+
+export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogout }) {
+  const [tab, setTab] = useState("overview");
+  const [f, setF] = useState({ from: daysAgoStr(30), to: todayStr(), state: "", city: "", area: "", userId: "", asset: "" });
+  const [summary, setSummary] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const loadUsers = useCallback(() => {
+    api.users().then((r) => setUsers(r.users)).catch((e) => setError(e.message));
+  }, []);
+
+  useEffect(() => { loadUsers(); }, [loadUsers]);
+
+  // Keep cross-role changes fresh without requiring a full page reload. Focus
+  // refreshes are immediate; polling covers a manager/field tab left open.
+  useEffect(() => {
+    const refreshVisible = () => {
+      if (document.visibilityState === "hidden") return;
+      loadUsers();
+      setRefreshKey((key) => key + 1);
+    };
+    const interval = window.setInterval(refreshVisible, 30000);
+    window.addEventListener("focus", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
+  }, [loadUsers]);
+
+  useEffect(() => {
+    let live = true;
+    api.summary(f)
+      .then((s) => live && (setSummary(s), setError("")))
+      .catch((e) => live && setError(e.message));
+    return () => { live = false; };
+  }, [f, refreshKey]);
+
+  // The presentational cards expect a flat shape.
+  const a = useMemo(() => {
+    if (!summary) return null;
+    return {
+      ...summary,
+      plannedShops: summary.totals.plannedShops,
+      activatedShops: summary.totals.activatedShops,
+      shopPen: summary.totals.shopPen,
+      plannedAssets: summary.totals.plannedAssets,
+      installedAssets: summary.totals.installedAssets,
+      assetPen: summary.totals.assetPen,
+      activeUsers: summary.totals.activeUsers,
+      todayCount: summary.totals.today,
+    };
+  }, [summary]);
+
+  const tabs = [
+    { key: "overview", label: "Overview", icon: LayoutDashboard },
+    { key: "analytics", label: "Performance", icon: BarChart3 },
+    { key: "records", label: "Records", icon: FileText },
+    { key: "plan", label: "Plan vs actual", icon: Target },
+    { key: "data", label: "Data", icon: Users },
+    { key: "approvals", label: "Approvals", icon: ClipboardCheck },
+  ];
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-600 text-white"><Store size={17} /></span>
+            <div>
+              <p className="text-sm font-semibold text-slate-900">{APP_NAME}</p>
+              <p className="text-xs text-slate-500">{BRAND_LINE}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="hidden text-sm text-slate-600 sm:inline">{user.name}</span>
+            <Button variant="ghost" size="sm" onClick={onLogout}><LogOut size={15} /> Log out</Button>
+          </div>
+        </div>
+        <div className="mx-auto max-w-7xl overflow-x-auto px-4">
+          <div className="flex gap-1">
+            {tabs.map((t) => (
+              <button key={t.key} onClick={() => setTab(t.key)}
+                className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm ${
+                  tab === t.key ? "border-teal-600 font-medium text-teal-700" : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}>
+                <t.icon size={15} /> {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl space-y-4 px-4 py-5">
+        {tab !== "data" && tab !== "approvals" ? <FilterBar geo={geo} users={users} f={f} setF={setF} /> : null}
+        {error ? <Banner kind="error">{error}</Banner> : null}
+
+        {tab !== "data" && tab !== "approvals" && tab !== "records" && !a ? (
+          <div className="flex justify-center py-16 text-slate-400"><Loader2 className="animate-spin" /></div>
+        ) : null}
+
+        {tab === "overview" && a ? <AdminOverview a={a} /> : null}
+        {tab === "analytics" && a ? <AdminAnalytics a={a} /> : null}
+        {tab === "records" ? (
+          <AdminRecords filters={f} refreshKey={refreshKey} />
+        ) : null}
+        {tab === "plan" && a ? (
+          <AdminPlan a={a} planCount={planCount} filters={f} onPlansChanged={onPlansChanged} />
+        ) : null}
+        {tab === "data" ? (
+          <AdminData geo={geo} users={users} filters={f} onUsersChanged={() => { loadUsers(); setRefreshKey((key) => key + 1); }} />
+        ) : null}
+        {tab === "approvals" ? <AdminApprovals onApproved={() => { onPlansChanged(); loadUsers(); setRefreshKey((k) => k + 1); }} /> : null}
+      </main>
+    </div>
+  );
+}
