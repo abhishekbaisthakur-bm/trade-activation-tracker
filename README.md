@@ -9,6 +9,9 @@ against plan.
 - **Photos** your disk or any S3-compatible bucket, never a third-party service
 - **Auth** JWT with bcrypt password hashing, three roles: admin, manager and field
 
+For the recommended production architecture using Vercel, Render PostgreSQL and
+Cloudflare R2, follow [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ---
 
 ## 1. Quick start with Docker
