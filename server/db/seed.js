@@ -42,7 +42,13 @@ async function main() {
   const admin = await query(
     `INSERT INTO users (name, employee_id, email, role, password_hash, active)
      VALUES ($1,$2,$3,'admin',$4,TRUE)
-     ON CONFLICT (employee_id) DO UPDATE SET role = 'admin', active = TRUE
+     ON CONFLICT (employee_id) DO UPDATE SET
+       name = EXCLUDED.name,
+       email = EXCLUDED.email,
+       role = 'admin',
+       password_hash = EXCLUDED.password_hash,
+       active = TRUE,
+       updated_at = now()
      RETURNING id, employee_id`,
     [
       config.bootstrapAdmin.name,
