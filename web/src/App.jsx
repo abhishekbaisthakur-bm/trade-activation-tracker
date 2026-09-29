@@ -97,7 +97,9 @@ export default function App() {
     return {
       states,
       cities: (state) => [...new Set(plans.filter((p) => !state || p.state === state).map((p) => p.city))].sort(),
-      areas: (city, state) => [...new Set(plans.filter((p) => p.city === city && (!state || p.state === state)).map((p) => p.area))].sort(),
+      areas: (city, state) => [...new Set(plans
+        .filter((p) => (!city || p.city === city) && (!state || p.state === state))
+        .map((p) => p.area))].sort(),
     };
   }, [plans]);
 

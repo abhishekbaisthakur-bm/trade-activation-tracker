@@ -88,6 +88,10 @@ router.post("/field-users", requireRole("manager"), async (req, res, next) => {
         error: "The initial password must be at least 8 characters."
       });
     }
+    if (!b.state || !b.city) {
+      return res.status(400).json({ error: "State and city are required for every field user." });
+    }
+    assertManagerTerritory(req.user, b);
 
     const { rows } = await query(
       `INSERT INTO users
@@ -135,7 +139,7 @@ router.patch("/field-users/:id", requireRole("manager"), async (req, res, next) 
     const b = req.body || {};
 
     const existing = await query(
-      `SELECT id
+      `SELECT id, assigned_state, assigned_city
        FROM users
        WHERE id = $1
          AND role = 'field'
@@ -148,6 +152,15 @@ router.patch("/field-users/:id", requireRole("manager"), async (req, res, next) 
         error: "Field user not found in your team."
       });
     }
+
+    const nextTerritory = {
+      state: b.state !== undefined ? b.state : existing.rows[0].assigned_state,
+      city: b.city !== undefined ? b.city : existing.rows[0].assigned_city,
+    };
+    if (!nextTerritory.state || !nextTerritory.city) {
+      return res.status(400).json({ error: "State and city are required for every field user." });
+    }
+    assertManagerTerritory(req.user, nextTerritory);
 
     const sets = [];
     const params = [];
@@ -571,6 +584,7 @@ router.post("/", requireRole("manager"), async (req, res, next) => {
     }
 
     validateRequest(b.type, b.payload);
+    if (b.type === "target_change") assertManagerTerritory(req.user, b.payload);
 
     const { rows } = await query(
       `INSERT INTO approval_requests
@@ -664,6 +678,12 @@ router.post("/", requireRole("manager"), async (req, res, next) => {
     await client.query("UPDATE users SET active=FALSE, updated_at=now() WHERE id=$1", [u.id]);
   }
   async function applyTargetChange(client, p, requestedBy, approvedBy) {
+    const requester = await client.query("SELECT role,assigned_state,assigned_city FROM users WHERE id=$1", [requestedBy]);
+    const manager = requester.rows[0];
+    if (!manager || manager.role !== "manager" || !manager.assigned_state) {
+      throw Object.assign(new Error("The requesting manager has no assigned territory."), { status: 403 });
+    }
+    assertManagerTerritory(manager, p);
     const assets = p.assets || {};
     const shops = Math.max(0, parseInt(p.plannedShops, 10) || 0);
     const existing = await client.query("SELECT * FROM planned_targets WHERE state=$1 AND city=$2 AND area=$3 FOR UPDATE", [p.state, p.city, p.area]);

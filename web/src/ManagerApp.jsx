@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Store, LogOut, Send, Users, Target, Clock, Loader2, Plus, KeyRound, CheckCircle2, XCircle, Download, Upload } from "lucide-react";
+import { Store, LogOut, Send, Users, Target, Clock, Loader2, Plus, KeyRound, CheckCircle2, XCircle, Download, Upload, BarChart3 } from "lucide-react";
 import { api } from "./api";
-import { APP_NAME, BRAND_LINE, ASSETS, inputCls, Field, TextInput, Select, ComboInput, Button, Card, Banner, statusTone } from "./ui";
+import { APP_NAME, BRAND_LINE, ASSETS, inputCls, Field, TextInput, Select, ComboInput, Button, Card, Banner, PenTable, PenCell, statusTone } from "./ui";
 
 const emptyAssets = Object.fromEntries(ASSETS.map(a => [a.key, 0]));
 const emptyTarget = () => ({ state:"", city:"", area:"", plannedShops:0, changeType:"addition", assets:{...emptyAssets} });
@@ -307,6 +307,65 @@ function ChangePassword({ onClose }) {
   );
 }
 
+function ManagerPerformance({ user, geo }) {
+  const [filters, setFilters] = useState({ city: user.city || "", area: "" });
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    setData(null);
+    api.managerSummary(filters)
+      .then((result) => { if (live) { setData(result); setError(""); } })
+      .catch((e) => { if (live) setError(e.message); });
+    return () => { live = false; };
+  }, [filters]);
+
+  return <div className="space-y-4">
+    <Card className="p-4">
+      <p className="text-sm font-semibold text-slate-900">Territory target performance</p>
+      <p className="mt-1 text-xs text-slate-500">State: {user.state}{user.city ? ` · City: ${user.city}` : " · Entire state"}</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Field label="City">
+          <Select value={filters.city} onChange={(city) => setFilters({ city, area: "" })}
+            options={geo.cities(user.state)} placeholder="All cities" disabled={!!user.city} />
+        </Field>
+        <Field label="Area">
+          <Select value={filters.area} onChange={(area) => setFilters((f) => ({ ...f, area }))}
+            options={geo.areas(filters.city, user.state)} placeholder="All areas" />
+        </Field>
+      </div>
+    </Card>
+    {error ? <Banner kind="error">{error}</Banner> : null}
+    {!data ? <div className="flex justify-center py-12 text-slate-400"><Loader2 className="animate-spin" size={22}/></div> : <>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card className="p-4"><p className="text-xs text-slate-500">Planned shops</p><p className="mt-1 text-2xl font-semibold">{data.totals.plannedShops}</p></Card>
+        <Card className="p-4"><p className="text-xs text-slate-500">Activated shops</p><p className="mt-1 text-2xl font-semibold">{data.totals.activatedShops}</p></Card>
+        <Card className="p-4"><p className="text-xs text-slate-500">Shop penetration</p><p className="mt-1 text-2xl font-semibold">{data.totals.shopPen}%</p></Card>
+      </div>
+      <PenTable head="State-wise plan vs actual" rows={data.byState} cols={[
+        { label: "State", render: (r) => r.key },
+        { label: "Planned", right: true, render: (r) => r.plannedShops },
+        { label: "Activated", right: true, render: (r) => r.activatedShops },
+        { label: "Penetration", right: true, render: (r) => <PenCell value={r.shopPen}/> },
+      ]}/>
+      <PenTable head="City-wise plan vs actual" rows={data.byCity} cols={[
+        { label: "City", render: (r) => r.key },
+        { label: "Planned", right: true, render: (r) => r.plannedShops },
+        { label: "Activated", right: true, render: (r) => r.activatedShops },
+        { label: "Penetration", right: true, render: (r) => <PenCell value={r.shopPen}/> },
+      ]}/>
+      <PenTable head="Area-wise plan vs actual" rows={data.byArea} cols={[
+        { label: "Area", render: (r) => r.key },
+        { label: "City", render: (r) => r.city },
+        { label: "Planned", right: true, render: (r) => r.plannedShops },
+        { label: "Activated", right: true, render: (r) => r.activatedShops },
+        { label: "Penetration", right: true, render: (r) => <PenCell value={r.shopPen}/> },
+      ]}/>
+    </>}
+  </div>;
+}
+
 export default function ManagerApp({ user, geo, onLogout }) {
   const [tab,setTab]=useState("overview"), [refresh,setRefresh]=useState(0), [msg,setMsg]=useState(null), [busy,setBusy]=useState(false);
   const [teamData, setTeamData] = useState({ totals: { salesmen: 0, storesActivated: 0, activations: 0 }, salesmen: [] });
@@ -314,7 +373,9 @@ export default function ManagerApp({ user, geo, onLogout }) {
   const [salesmanDetails, setSalesmanDetails] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [photoUrls, setPhotoUrls] = useState({});
-  const [target,setTarget]=useState(emptyTarget()), [field,setField]=useState(emptyField()), [fieldUsers,setFieldUsers]=useState([]), [deactivateId,setDeactivateId]=useState("");
+  const newTarget = () => ({ ...emptyTarget(), state: user.state || "", city: user.city || "" });
+  const newField = () => ({ ...emptyField(), state: user.state || "", city: user.city || "" });
+  const [target,setTarget]=useState(newTarget), [field,setField]=useState(newField), [fieldUsers,setFieldUsers]=useState([]), [deactivateId,setDeactivateId]=useState("");
   const loadFieldUsers = useCallback(() =>
     api.fieldUsers().then((r) => setFieldUsers(r.users)), []);
   const loadTeam = useCallback(() =>
@@ -337,7 +398,7 @@ export default function ManagerApp({ user, geo, onLogout }) {
       document.removeEventListener("visibilitychange", refreshVisible);
     };
   }, [loadTeam]);
-  const submit=async(type,payload,reason)=>{ setBusy(true);setMsg(null);try{await api.createRequest(type,payload,reason);setMsg({kind:'success',text:'Request submitted for admin approval. No live data has changed.'});setRefresh(x=>x+1);if(type==='target_change')setTarget(emptyTarget());if(type==='user_create')setField(emptyField());}catch(e){setMsg({kind:'error',text:e.message})}finally{setBusy(false)}};
+  const submit=async(type,payload,reason)=>{ setBusy(true);setMsg(null);try{await api.createRequest(type,payload,reason);setMsg({kind:'success',text:'Request submitted for admin approval. No live data has changed.'});setRefresh(x=>x+1);if(type==='target_change')setTarget(newTarget());if(type==='user_create')setField(newField());}catch(e){setMsg({kind:'error',text:e.message})}finally{setBusy(false)}};
   const createFieldUser = async () => {
   setBusy(true);
   setMsg(null);
@@ -350,7 +411,7 @@ export default function ManagerApp({ user, geo, onLogout }) {
       text: "Field user created successfully."
     });
 
-    setField(emptyField());
+    setField(newField());
 
     const [fields, team] = await Promise.all([api.fieldUsers(), api.managerTeam()]);
     setFieldUsers(fields.users);
@@ -460,7 +521,7 @@ const deactivateFieldUser = async () => {
   }
 };
 
-const tabs=[['overview','Overview',Store],['master','Master data',CheckCircle2],['field','Salesmen',Users],['target','Targets',Target],['requests','Requests',Clock]];
+const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3],['master','Master data',CheckCircle2],['field','Salesmen',Users],['target','Targets',Target],['requests','Requests',Clock]];
   return <div className="min-h-screen bg-slate-50">
 <header className="border-b border-slate-200 bg-white">
 <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
@@ -574,15 +635,16 @@ const tabs=[['overview','Overview',Store],['master','Master data',CheckCircle2],
 <img src={photoUrl} alt={`${x.assetType} proof`} className="h-40 w-full rounded-lg border border-slate-200 object-cover"/>
 <p className="mt-1 text-xs text-teal-700">Click photo to view full size</p>
 </a>:x.hasPhoto?<p className="mt-2 text-xs text-slate-500">Loading photo...</p>:<p className="mt-2 text-xs text-slate-400">No proof photo</p>}</div>})}</div>:<p className="mt-1 text-sm text-slate-500">None</p>}</div>
-</div>)}</div>:<div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">No activations yet for this salesperson.</div>:<div className="py-8 text-center text-sm text-slate-500">Loading activation details...</div>}</Card>:null}</div>:null}{tab==='master'?<MasterDataReviews/>:null}{tab==='requests'?<RequestHistory refresh={refresh}/>:null}{tab==='target'?<Card className="p-5">
+</div>)}</div>:<div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">No activations yet for this salesperson.</div>:<div className="py-8 text-center text-sm text-slate-500">Loading activation details...</div>}</Card>:null}</div>:null}{tab==='performance'?<ManagerPerformance user={user} geo={geo}/>:null}{tab==='master'?<MasterDataReviews/>:null}{tab==='requests'?<RequestHistory refresh={refresh}/>:null}{tab==='target'?<Card className="p-5">
 <h2 className="mb-1 text-lg font-semibold">Suggest a target change</h2>
 <p className="mb-4 text-sm text-slate-500">Your suggestion remains pending until an Admin approves it. Approved changes are added to history and never silently overwrite old data.</p>
 <div className="grid gap-3 md:grid-cols-3">
 <Field label="State">
-<Select value={target.state} onChange={v=>setTarget({...target,state:v,city:'',area:''})} options={geo.states} placeholder="Select state"/>
+<Select value={target.state} onChange={()=>{}} options={[user.state]} placeholder="Assigned state" disabled/>
 </Field>
 <Field label="City">
-<Select value={target.city} onChange={v=>setTarget({...target,city:v,area:''})} options={geo.cities(target.state)} placeholder="Select city" disabled={!target.state}/>
+{user.city ? <Select value={target.city} onChange={()=>{}} options={[user.city]} placeholder="Assigned city" disabled/> :
+<ComboInput value={target.city} onChange={v=>setTarget({...target,city:v,area:''})} options={geo.cities(target.state)} placeholder="Type or select city" />}
 </Field>
 <Field label="Area">
 <TextInput value={target.area} onChange={e=>setTarget({...target,area:e.target.value})} placeholder="Existing or new area"/>
@@ -628,10 +690,11 @@ const tabs=[['overview','Overview',Store],['master','Master data',CheckCircle2],
 <TextInput type="password" value={field.password} onChange={e=>setField({...field,password:e.target.value})}/>
 </Field>
 <Field label="State">
-<ComboInput value={field.state} onChange={v=>setField({...field,state:v,city:''})} options={geo.states} placeholder="Type or select state"/>
+<Select value={field.state} onChange={()=>{}} options={[user.state]} placeholder="Assigned state" disabled/>
 </Field>
 <Field label="City">
-<ComboInput value={field.city} onChange={v=>setField({...field,city:v})} options={field.state ? geo.cities(field.state) : []} placeholder="Type or select city"/>
+{user.city ? <Select value={field.city} onChange={()=>{}} options={[user.city]} placeholder="Assigned city" disabled/> :
+<ComboInput value={field.city} onChange={v=>setField({...field,city:v})} options={field.state ? geo.cities(field.state) : []} placeholder="Type or select city"/>}
 </Field>
 </div>
 <Button disabled={busy} onClick={createFieldUser}>{busy?<Loader2 className="animate-spin" size={15}/>:<Plus size={15}/>} Add field user</Button>

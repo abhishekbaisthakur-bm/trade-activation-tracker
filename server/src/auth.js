@@ -50,6 +50,9 @@ function requireAdmin(req, res, next) {
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) return res.status(403).json({ error: "You do not have permission for this action." });
+    if (req.user.role === "manager" && !req.user.assigned_state) {
+      return res.status(403).json({ error: "Your manager account needs an assigned state before it can access territory data." });
+    }
     next();
   };
 }

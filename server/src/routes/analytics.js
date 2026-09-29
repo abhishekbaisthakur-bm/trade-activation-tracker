@@ -22,8 +22,14 @@ async function summary(q) {
   const planParams = q.asset ? [...plan.params, q.asset] : plan.params;
 
   const dim = async (col) => {
+    const columns = col === "state" ? ["state"] : col === "city" ? ["state", "city"] : ["state", "city", "area"];
+    const actualGroup = columns.map((name) => `a.${name}`).join(", ");
+    const planGroup = columns.map((name) => `p.${name}`).join(", ");
+    const actualMapKey = `concat_ws(chr(31), ${columns.map((name) => `a.${name}`).join(", ")})`;
+    const planMapKey = `concat_ws(chr(31), ${columns.map((name) => `p.${name}`).join(", ")})`;
     const acts = await query(
-      `SELECT a.${col} AS key, MIN(a.state) AS state,
+      `SELECT ${actualMapKey} AS map_key, a.${col} AS key,
+              MIN(a.state) AS state, MIN(a.city) AS city,
               COUNT(DISTINCT a.shop_key)::int AS activated_shops,
               COUNT(DISTINCT a.id)::int AS activations,
               COALESCE(SUM(aa.quantity), 0)::int AS installed
@@ -32,11 +38,12 @@ async function summary(q) {
        LEFT JOIN activation_assets aa ON aa.activation_id = a.id
          ${q.asset ? "AND aa.asset_type = $" + (params.length + 1) : ""}
        ${effectiveClause}
-       GROUP BY a.${col}`,
+       GROUP BY ${actualGroup}`,
       q.asset ? [...params, q.asset] : params
     );
     const plans = await query(
-      `SELECT p.${col} AS key, MIN(p.state) AS state,
+      `SELECT ${planMapKey} AS map_key, p.${col} AS key,
+              MIN(p.state) AS state, MIN(p.city) AS city,
               SUM(p.planned_shops)::int AS planned_shops,
               COALESCE(SUM(pa.quantity), 0)::int AS planned_assets
        FROM planned_targets p
@@ -47,26 +54,27 @@ async function summary(q) {
          GROUP BY plan_id
        ) pa ON pa.plan_id = p.id
        ${plan.clause}
-       GROUP BY p.${col}`,
+       GROUP BY ${planGroup}`,
       planParams
     );
     const map = new Map();
     plans.rows.forEach((r) =>
-      map.set(r.key, {
-        key: r.key, state: r.state, plannedShops: r.planned_shops, plannedAssets: r.planned_assets,
+      map.set(r.map_key, {
+        key: r.key, state: r.state, city: r.city, plannedShops: r.planned_shops, plannedAssets: r.planned_assets,
         activatedShops: 0, installed: 0, activations: 0,
       })
     );
     acts.rows.forEach((r) => {
-      const cur = map.get(r.key) || {
-        key: r.key, state: r.state, plannedShops: 0, plannedAssets: 0,
+      const cur = map.get(r.map_key) || {
+        key: r.key, state: r.state, city: r.city, plannedShops: 0, plannedAssets: 0,
         activatedShops: 0, installed: 0, activations: 0,
       };
       cur.state = cur.state || r.state;
+      cur.city = cur.city || r.city;
       cur.activatedShops = r.activated_shops;
       cur.installed = r.installed;
       cur.activations = r.activations;
-      map.set(r.key, cur);
+      map.set(r.map_key, cur);
     });
     return [...map.values()]
       .map((r) => ({ ...r, shopPen: pct(r.activatedShops, r.plannedShops), assetPen: pct(r.installed, r.plannedAssets) }))
@@ -272,6 +280,24 @@ router.get("/manager/team/:userId/activations", requireRole("manager"), async (r
       salesperson: member.rows[0],
       activations: rows
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Managers receive the same state/city/area plan-vs-actual breakdown as admins,
+// but the server always pins it to their assigned territory. Client filters can
+// narrow the result; they can never widen it.
+router.get("/manager/summary", requireRole("manager"), async (req, res, next) => {
+  try {
+    const scoped = {
+      ...req.query,
+      state: req.user.assigned_state,
+      city: req.user.assigned_city || req.query.city || "",
+    };
+    const data = await summary(scoped);
+    const { bySales, ...territoryData } = data;
+    res.json(territoryData);
   } catch (err) {
     next(err);
   }

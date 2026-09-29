@@ -123,6 +123,7 @@ export const api = {
   myStats: () => request("/analytics/me"),
 
   managerTeam: () => request("/analytics/manager/team"),
+  managerSummary: (filters) => request(`/analytics/manager/summary${qs(filters)}`),
   managerSalesmanActivations: (userId) =>
   request(`/analytics/manager/team/${userId}/activations`),
   fieldUsers: () => request("/requests/field-users"),

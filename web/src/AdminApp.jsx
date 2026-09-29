@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { api } from "./api";
 import {
-  APP_NAME, BRAND_LINE, ASSETS, assetLabel, inputCls, Field, TextInput, Select, Button, Card,
+  APP_NAME, BRAND_LINE, ASSETS, assetLabel, inputCls, Field, TextInput, Select, ComboInput, Button, Card,
   Banner, Modal, MiniMap, PenTable, PenCell, AdminOverview, AdminAnalytics, fmtDate, fmtTime,
   statusTone,
 } from "./ui";
@@ -269,8 +269,26 @@ function AdminPlan({ a, planCount, filters, onPlansChanged }) {
         {msg ? <div className="mt-3"><Banner kind={msg.kind}>{msg.text}</Banner></div> : null}
       </Card>
 
+      <PenTable head="Plan vs actual by state" rows={a.byState} cols={[
+        { label: "State", render: (r) => r.key },
+        { label: "Planned shops", right: true, render: (r) => r.plannedShops },
+        { label: "Actual activated", right: true, render: (r) => r.activatedShops },
+        { label: "Gap", right: true, render: (r) => Math.max(0, r.plannedShops - r.activatedShops) },
+        { label: "Shop penetration", right: true, render: (r) => <PenCell value={r.shopPen} /> },
+      ]} />
+
       <PenTable head="Plan vs actual by city" rows={a.byCity} cols={[
         { label: "City", render: (r) => r.key },
+        { label: "Planned shops", right: true, render: (r) => r.plannedShops },
+        { label: "Actual activated", right: true, render: (r) => r.activatedShops },
+        { label: "Gap", right: true, render: (r) => Math.max(0, r.plannedShops - r.activatedShops) },
+        { label: "Shop penetration", right: true, render: (r) => <PenCell value={r.shopPen} /> },
+      ]} />
+
+      <PenTable head="Plan vs actual by area" rows={a.byArea} cols={[
+        { label: "Area", render: (r) => r.key },
+        { label: "City", render: (r) => r.city },
+        { label: "State", render: (r) => r.state },
         { label: "Planned shops", right: true, render: (r) => r.plannedShops },
         { label: "Actual activated", right: true, render: (r) => r.activatedShops },
         { label: "Gap", right: true, render: (r) => Math.max(0, r.plannedShops - r.activatedShops) },
@@ -306,6 +324,16 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
   const save = async () => {
     setBusy(true);
     setErr("");
+    if (draft.role === "manager" && !draft.state?.trim()) {
+      setErr("Assign a state to every manager. City is optional.");
+      setBusy(false);
+      return;
+    }
+    if (draft.role === "field" && (!draft.state?.trim() || !draft.city?.trim())) {
+      setErr("Assign both a state and city to every field user.");
+      setBusy(false);
+      return;
+    }
     try {
       if (editing === "new") await api.createUser(draft);
       else {
@@ -365,7 +393,9 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
                   <td className="px-4 py-2.5">{u.employeeId}</td>
                   <td className="px-4 py-2.5">{u.mobile || "-"}</td>
                   <td className="px-4 py-2.5 capitalize">{u.role}</td>
-                  <td className="px-4 py-2.5">{[u.city, u.state].filter(Boolean).join(", ") || "PAN India"}</td>
+                  <td className="px-4 py-2.5">{
+                    u.role === "admin" ? "PAN India" : u.city ? `${u.city}, ${u.state}` : u.state ? `Entire ${u.state}` : "Territory required"
+                  }</td>
                   <td className="px-4 py-2.5">
                     <span className={`rounded-full border px-2 py-0.5 text-xs ${u.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
                       {u.active ? "Active" : "Inactive"}
@@ -399,7 +429,7 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
             <Field label="Email"><TextInput value={draft.email || ""} onChange={(e) => setDraft({ ...draft, email: e.target.value })} /></Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Role">
-                <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} className={inputCls}>
+                <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value, ...(e.target.value === "admin" ? { state: "", city: "" } : {}) })} className={inputCls}>
                   <option value="field">Field user</option>
                   <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
@@ -410,14 +440,14 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
                 <TextInput type="password" value={draft.password || ""} onChange={(e) => setDraft({ ...draft, password: e.target.value })} />
               </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Assigned state">
-                <Select value={draft.state || ""} onChange={(v) => setDraft({ ...draft, state: v, city: "" })} options={geo.states} placeholder="Select state" />
+            {draft.role !== "admin" ? <div className="grid grid-cols-2 gap-3">
+              <Field label="Assigned state" required>
+                <ComboInput value={draft.state || ""} onChange={(v) => setDraft({ ...draft, state: v, city: "" })} options={geo.states} placeholder="Type or select state" />
               </Field>
-              <Field label="Assigned city">
-                <Select value={draft.city || ""} onChange={(v) => setDraft({ ...draft, city: v })} options={geo.cities(draft.state)} placeholder="Select city" disabled={!draft.state} />
+              <Field label="Assigned city" required={draft.role === "field"} hint={draft.role === "manager" ? "Optional — blank means the entire state" : "Required for field users"}>
+                <ComboInput value={draft.city || ""} onChange={(v) => setDraft({ ...draft, city: v })} options={draft.state ? geo.cities(draft.state) : []} placeholder="Type or select city" />
               </Field>
-            </div>
+            </div> : <Banner kind="info">Admins have PAN India access.</Banner>}
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={draft.active !== false} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
               Account is active

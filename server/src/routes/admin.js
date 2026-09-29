@@ -8,6 +8,14 @@ const { publicUser } = require("./auth");
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
+const validRole = (role) => (["admin", "manager", "field"].includes(role) ? role : "field");
+
+function validateTerritory(role, state, city) {
+  if (role === "manager" && !state) return "Assign a state to every manager. City is optional.";
+  if (role === "field" && (!state || !city)) return "Assign both a state and city to every field user.";
+  return null;
+}
+
 router.use(requireAuth);
 
 /* -------------------------------- users -------------------------------- */
@@ -30,6 +38,9 @@ router.post("/users", requireAdmin, async (req, res, next) => {
     if (String(b.password).length < 8) {
       return res.status(400).json({ error: "The initial password must be at least 8 characters." });
     }
+    const role = validRole(b.role);
+    const territoryError = validateTerritory(role, b.state, b.city);
+    if (territoryError) return res.status(400).json({ error: territoryError });
     const { rows } = await query(
       `INSERT INTO users (name, employee_id, mobile, email, role, assigned_state, assigned_city, password_hash, active)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
@@ -38,9 +49,9 @@ router.post("/users", requireAdmin, async (req, res, next) => {
         b.employeeId.trim(),
         b.mobile || null,
         b.email || null,
-        ["admin", "manager", "field"].includes(b.role) ? b.role : "field",
-        b.state || null,
-        b.city || null,
+        role,
+        role === "admin" ? null : b.state || null,
+        role === "admin" ? null : b.city || null,
         await hashPassword(String(b.password)),
         b.active !== false,
       ]
@@ -61,6 +72,15 @@ router.patch("/users/:id", requireAdmin, async (req, res, next) => {
     if (req.params.id === req.user.id && (b.role !== undefined || b.active === false)) {
       return res.status(400).json({ error: "You cannot change your own role or deactivate your own account." });
     }
+    const currentResult = await query("SELECT role, assigned_state, assigned_city FROM users WHERE id = $1", [req.params.id]);
+    if (!currentResult.rows.length) return res.status(404).json({ error: "User not found." });
+    const current = currentResult.rows[0];
+    const nextRole = b.role !== undefined ? validRole(b.role) : current.role;
+    const nextState = b.state !== undefined ? b.state : current.assigned_state;
+    const nextCity = b.city !== undefined ? b.city : current.assigned_city;
+    const territoryError = validateTerritory(nextRole, nextState, nextCity);
+    if (territoryError) return res.status(400).json({ error: territoryError });
+
     const sets = [];
     const params = [];
     const put = (col, val) => {
@@ -71,9 +91,9 @@ router.patch("/users/:id", requireAdmin, async (req, res, next) => {
     if (b.employeeId !== undefined) put("employee_id", b.employeeId.trim());
     if (b.mobile !== undefined) put("mobile", b.mobile || null);
     if (b.email !== undefined) put("email", b.email || null);
-    if (b.role !== undefined) put("role", ["admin", "manager", "field"].includes(b.role) ? b.role : "field");
-    if (b.state !== undefined) put("assigned_state", b.state || null);
-    if (b.city !== undefined) put("assigned_city", b.city || null);
+    if (b.role !== undefined) put("role", nextRole);
+    if (b.state !== undefined || nextRole === "admin") put("assigned_state", nextRole === "admin" ? null : nextState || null);
+    if (b.city !== undefined || nextRole === "admin") put("assigned_city", nextRole === "admin" ? null : nextCity || null);
     if (b.active !== undefined) put("active", !!b.active);
     if (b.password) {
       if (String(b.password).length < 8) {

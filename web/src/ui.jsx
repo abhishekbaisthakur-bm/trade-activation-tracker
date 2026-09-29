@@ -614,6 +614,8 @@ export function AdminAnalytics({ a }) {
         rows={a.byArea}
         cols={[
           { label: "Area", render: (r) => r.key },
+          { label: "City", render: (r) => r.city },
+          { label: "State", render: (r) => r.state },
           { label: "Planned", right: true, render: (r) => r.plannedShops },
           { label: "Activated", right: true, render: (r) => r.activatedShops },
           { label: "Asset penetration", right: true, render: (r) => <PenCell value={r.assetPen} /> },
