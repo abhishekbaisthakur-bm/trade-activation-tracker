@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { config } = require("./config");
 const { query } = require("./db");
+const { isLeader } = require("./hierarchy");
 
 const hashPassword = (plain) => bcrypt.hash(plain, 12);
 const verifyPassword = (plain, hash) => bcrypt.compare(plain, hash);
@@ -29,7 +30,7 @@ async function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, config.jwtSecret);
     const { rows } = await query(
-      "SELECT id, name, employee_id, mobile, email, role, assigned_state, assigned_city, active FROM users WHERE id = $1",
+      "SELECT id, name, employee_id, mobile, email, role, region, assigned_state, assigned_city, manager_id, active FROM users WHERE id = $1",
       [payload.sub]
     );
     if (!rows.length || !rows[0].active) {
@@ -50,8 +51,8 @@ function requireAdmin(req, res, next) {
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) return res.status(403).json({ error: "You do not have permission for this action." });
-    if (req.user.role === "manager" && !req.user.assigned_state) {
-      return res.status(403).json({ error: "Your manager account needs an assigned state before it can access territory data." });
+    if (isLeader(req.user.role) && !req.user.region) {
+      return res.status(403).json({ error: "Your account needs an assigned Region before it can access hierarchy data." });
     }
     next();
   };

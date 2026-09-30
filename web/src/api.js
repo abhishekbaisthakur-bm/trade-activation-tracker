@@ -126,6 +126,8 @@ export const api = {
   managerSummary: (filters) => request(`/analytics/manager/summary${qs(filters)}`),
   managerSalesmanActivations: (userId) =>
   request(`/analytics/manager/team/${userId}/activations`),
+  managedUsers: () => request("/requests/managed-users"),
+  createManagedUser: (user) => request("/requests/managed-users", { method: "POST", body: user }),
   fieldUsers: () => request("/requests/field-users"),
   createFieldUser: (user) =>
   request("/requests/field-users", { method: "POST", body: user }),

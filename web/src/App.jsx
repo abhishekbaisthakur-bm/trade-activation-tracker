@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { Store, ChevronRight, Loader2 } from "lucide-react";
+import { Store, ChevronRight, Loader2, Eye, EyeOff } from "lucide-react";
 import { api, setToken, getToken } from "./api";
 import { APP_NAME, BRAND_LINE, Field, TextInput, Button, Banner } from "./ui";
 import FieldApp from "./FieldApp";
@@ -9,6 +9,7 @@ import ManagerApp from "./ManagerApp";
 function Login({ onLogin }) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -46,8 +47,15 @@ function Login({ onLogin }) {
               placeholder="EMP1001" autoComplete="username" onKeyDown={(e) => e.key === "Enter" && submit()} />
           </Field>
           <Field label="Password" required>
-            <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password" autoComplete="current-password" onKeyDown={(e) => e.key === "Enter" && submit()} />
+            <div className="relative">
+              <TextInput type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter password" autoComplete="current-password" onKeyDown={(e) => e.key === "Enter" && submit()} className="pr-11" />
+              <button type="button" onClick={() => setShowPassword((shown) => !shown)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-500 hover:text-slate-800">
+                {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
+              </button>
+            </div>
           </Field>
           {error ? <Banner kind="error">{error}</Banner> : null}
           <Button size="lg" onClick={submit} disabled={busy}>
@@ -124,6 +132,6 @@ export default function App() {
   if (user.role === "admin") {
     return <AdminApp user={user} geo={geo} planCount={plans.length} onPlansChanged={loadPlans} onLogout={logout} />;
   }
-  if (user.role === "manager") return <ManagerApp user={user} geo={geo} onLogout={logout} />;
+  if (["regional_head", "city_head", "team_lead"].includes(user.role)) return <ManagerApp user={user} geo={geo} onLogout={logout} />;
   return <FieldApp user={user} geo={geo} onLogout={logout} />;
 }

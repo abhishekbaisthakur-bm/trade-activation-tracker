@@ -86,6 +86,7 @@ function RecordDetail({ id, onClose }) {
               <Row label="Employee ID" value={record.employee_id} />
               <Row label="Date and time" value={`${fmtDate(record.occurred_at)} ${fmtTime(record.occurred_at)}`} />
               <Row label="Pharmacy" value={record.pharmacy_name} />
+              <Row label="Party Code (Alter Code)" value={record.party_code || "-"} />
               <Row label="Address" value={record.address || record.geo_address || "-"} />
               <Row label="Area" value={record.area} />
               <Row label="City" value={record.city} />
@@ -101,6 +102,9 @@ function RecordDetail({ id, onClose }) {
             ) : null}
             {record.duplicate_override ? (
               <div className="mt-3"><Banner kind="warn">Submitted as a repeat visit to this shop on the same day.</Banner></div>
+            ) : null}
+            {record.party_code_duplicate ? (
+              <div className="mt-3"><Banner kind="warn">Flagged: another salesman previously submitted this Party Code (Alter Code).</Banner></div>
             ) : null}
 
             <div className="mt-3"><MiniMap lat={record.latitude} lng={record.longitude} /></div>
@@ -307,13 +311,19 @@ function AdminPlan({ a, planCount, filters, onPlansChanged }) {
         onClick={() => api.download("/analytics/export/plan-vs-actual.csv", "plan-vs-actual.csv", filters)}>
         <Download size={15} /> Export plan vs actual
       </Button>
+      <Button variant="ghost" size="sm"
+        onClick={() => api.download("/analytics/export/performance.xlsx", "performance-report.xlsx", filters)}>
+        <Download size={15} /> Download Excel
+      </Button>
     </div>
   );
 }
 
 /* ----------------------------- data & users ----------------------------- */
 
-const emptyUser = { name: "", employeeId: "", mobile: "", email: "", role: "field", state: "", city: "", password: "", active: true };
+const emptyUser = { name: "", employeeId: "", mobile: "", email: "", role: "field", region: "", state: "", city: "", managerId: "", password: "", active: true };
+const roleLabel = (role) => ({ admin: "Admin", regional_head: "Regional Head", city_head: "City Head", team_lead: "Team Lead", field: "Salesman" }[role] || role);
+const parentRoles = { city_head: ["regional_head"], team_lead: ["regional_head", "city_head"], field: ["regional_head", "city_head", "team_lead"] };
 
 function AdminData({ geo, users, filters, onUsersChanged }) {
   const [editing, setEditing] = useState(null);
@@ -324,13 +334,13 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
   const save = async () => {
     setBusy(true);
     setErr("");
-    if (draft.role === "manager" && !draft.state?.trim()) {
-      setErr("Assign a state to every manager. City is optional.");
+    if (draft.role === "regional_head" && !draft.region?.trim()) {
+      setErr("Enter a Region for the Regional Head.");
       setBusy(false);
       return;
     }
-    if (draft.role === "field" && (!draft.state?.trim() || !draft.city?.trim())) {
-      setErr("Assign both a state and city to every field user.");
+    if (["city_head", "team_lead", "field"].includes(draft.role) && (!draft.state?.trim() || !draft.city?.trim() || !draft.managerId)) {
+      setErr("Select a reporting manager and enter both state and city.");
       setBusy(false);
       return;
     }
@@ -381,6 +391,7 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
                 <th className="px-4 py-2 font-medium">Employee ID</th>
                 <th className="px-4 py-2 font-medium">Mobile</th>
                 <th className="px-4 py-2 font-medium">Role</th>
+                <th className="px-4 py-2 font-medium">Reports to</th>
                 <th className="px-4 py-2 font-medium">Territory</th>
                 <th className="px-4 py-2 font-medium">Status</th>
                 <th className="px-4 py-2" />
@@ -392,9 +403,10 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
                   <td className="px-4 py-2.5 font-medium text-slate-900">{u.name}</td>
                   <td className="px-4 py-2.5">{u.employeeId}</td>
                   <td className="px-4 py-2.5">{u.mobile || "-"}</td>
-                  <td className="px-4 py-2.5 capitalize">{u.role}</td>
+                  <td className="px-4 py-2.5">{roleLabel(u.role)}</td>
+                  <td className="px-4 py-2.5">{u.reportingManagerName || "—"}</td>
                   <td className="px-4 py-2.5">{
-                    u.role === "admin" ? "PAN India" : u.city ? `${u.city}, ${u.state}` : u.state ? `Entire ${u.state}` : "Territory required"
+                    u.role === "admin" ? "PAN India" : u.role === "regional_head" ? (u.region || "Region required") : [u.city, u.state, u.region].filter(Boolean).join(", ") || "Territory required"
                   }</td>
                   <td className="px-4 py-2.5">
                     <span className={`rounded-full border px-2 py-0.5 text-xs ${u.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
@@ -429,9 +441,11 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
             <Field label="Email"><TextInput value={draft.email || ""} onChange={(e) => setDraft({ ...draft, email: e.target.value })} /></Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Role">
-                <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value, ...(e.target.value === "admin" ? { state: "", city: "" } : {}) })} className={inputCls}>
-                  <option value="field">Field user</option>
-                  <option value="manager">Manager</option>
+                <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value, region: "", state: "", city: "", managerId: "" })} className={inputCls}>
+                  <option value="field">Salesman</option>
+                  <option value="team_lead">Team Lead</option>
+                  <option value="city_head">City Head</option>
+                  <option value="regional_head">Regional Head</option>
                   <option value="admin">Admin</option>
                 </select>
               </Field>
@@ -440,14 +454,25 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
                 <TextInput type="password" value={draft.password || ""} onChange={(e) => setDraft({ ...draft, password: e.target.value })} />
               </Field>
             </div>
-            {draft.role !== "admin" ? <div className="grid grid-cols-2 gap-3">
+            {draft.role === "regional_head" ? <Field label="Region" required hint="Enter the Region manually; this is inherited by everyone below this account.">
+              <TextInput value={draft.region || ""} onChange={(e) => setDraft({ ...draft, region: e.target.value })} placeholder="e.g. West Region" />
+            </Field> : null}
+            {["city_head", "team_lead", "field"].includes(draft.role) ? <>
+            <Field label="Reporting manager" required>
+              <select value={draft.managerId || ""} onChange={(e) => setDraft({ ...draft, managerId: e.target.value })} className={inputCls}>
+                <option value="">Select reporting manager</option>
+                {users.filter((u) => u.active && (parentRoles[draft.role] || []).includes(u.role) && u.id !== editing).map((u) =>
+                  <option key={u.id} value={u.id}>{u.name} · {roleLabel(u.role)} · {u.region || "No Region"}</option>)}
+              </select>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
               <Field label="Assigned state" required>
                 <ComboInput value={draft.state || ""} onChange={(v) => setDraft({ ...draft, state: v, city: "" })} options={geo.states} placeholder="Type or select state" />
               </Field>
-              <Field label="Assigned city" required={draft.role === "field"} hint={draft.role === "manager" ? "Optional — blank means the entire state" : "Required for field users"}>
+              <Field label="Assigned city" required>
                 <ComboInput value={draft.city || ""} onChange={(v) => setDraft({ ...draft, city: v })} options={draft.state ? geo.cities(draft.state) : []} placeholder="Type or select city" />
               </Field>
-            </div> : <Banner kind="info">Admins have PAN India access.</Banner>}
+            </div></> : draft.role === "admin" ? <Banner kind="info">Admins have PAN India access.</Banner> : null}
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={draft.active !== false} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
               Account is active

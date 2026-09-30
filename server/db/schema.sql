@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
   employee_id    TEXT NOT NULL UNIQUE,
   mobile         TEXT UNIQUE,
   email          TEXT UNIQUE,
-  role           TEXT NOT NULL CHECK (role IN ('field', 'manager', 'admin')),
+  role           TEXT NOT NULL CHECK (role IN ('field', 'team_lead', 'city_head', 'regional_head', 'admin')),
+  region         TEXT,
   assigned_state TEXT,
   assigned_city  TEXT,
   manager_id     UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS pharmacies (
   address     TEXT,
   state       TEXT NOT NULL,
   city        TEXT NOT NULL,
-  area        TEXT NOT NULL,
+  area        TEXT,
   latitude    DOUBLE PRECISION,
   longitude   DOUBLE PRECISION,
   created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -59,11 +60,14 @@ CREATE TABLE IF NOT EXISTS activations (
   user_id            UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   pharmacy_id        UUID REFERENCES pharmacies(id) ON DELETE SET NULL,
   pharmacy_name      TEXT NOT NULL,
+  party_code         TEXT,
+  party_code_duplicate BOOLEAN NOT NULL DEFAULT FALSE,
+  duplicate_party_code_of UUID REFERENCES activations(id) ON DELETE SET NULL,
   shop_key           TEXT NOT NULL,
   address            TEXT,
   state              TEXT NOT NULL,
   city               TEXT NOT NULL,
-  area               TEXT NOT NULL,
+  area               TEXT,
   occurred_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   occurred_on        DATE NOT NULL DEFAULT CURRENT_DATE,
   latitude           DOUBLE PRECISION NOT NULL,
@@ -124,15 +128,33 @@ CREATE INDEX IF NOT EXISTS audit_log_when_idx ON audit_log (created_at DESC);
 ALTER TABLE users
 ADD COLUMN IF NOT EXISTS manager_id UUID REFERENCES users(id) ON DELETE SET NULL;
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS region TEXT;
+
+ALTER TABLE pharmacies ALTER COLUMN area DROP NOT NULL;
+ALTER TABLE activations ALTER COLUMN area DROP NOT NULL;
+ALTER TABLE activations ADD COLUMN IF NOT EXISTS party_code TEXT;
+ALTER TABLE activations ADD COLUMN IF NOT EXISTS party_code_duplicate BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE activations ADD COLUMN IF NOT EXISTS duplicate_party_code_of UUID REFERENCES activations(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS activations_party_code_idx ON activations (lower(trim(party_code))) WHERE party_code IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS users_manager_idx ON users (manager_id);
 
 -- Role migration for existing databases.
 DO $$
 BEGIN
   ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
-  ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('field','manager','admin'));
+  UPDATE users
+  SET role = CASE WHEN assigned_city IS NULL THEN 'regional_head' ELSE 'city_head' END,
+      region = COALESCE(region, assigned_state)
+  WHERE role = 'manager';
+  ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('field','team_lead','city_head','regional_head','admin'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+UPDATE users child
+SET region = COALESCE(child.region, parent.region, parent.assigned_state)
+FROM users parent
+WHERE child.manager_id = parent.id AND child.region IS NULL;
 
 CREATE TABLE IF NOT EXISTS approval_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

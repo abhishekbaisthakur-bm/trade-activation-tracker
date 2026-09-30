@@ -1,8 +1,10 @@
 const express = require("express");
+const ExcelJS = require("exceljs");
 const { query } = require("../db");
 const { requireAuth, requireAdmin, requireRole } = require("../auth");
 const { ASSETS, ASSET_LABEL } = require("../constants");
 const { buildFilters, buildPlanFilters } = require("../filters");
+const { LEADER_ROLES, descendantSql } = require("../hierarchy");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -13,22 +15,23 @@ const pct = (a, b) => (!b ? 0 : Math.round((a / b) * 1000) / 10);
  * All aggregation happens in Postgres. The dashboard never downloads the raw
  * activation table, so the numbers stay correct and fast as the data grows.
  */
-async function summary(q) {
- const { clause, params } = buildFilters(q);
+async function summary(q, opts = {}) {
+ const { clause, params } = buildFilters(q, opts);
   const effectiveClause = q.status
     ? clause
     : (clause ? clause + " AND a.status <> 'Rejected'" : "WHERE a.status <> 'Rejected'");
-  const plan = buildPlanFilters(q);
+  const plan = buildPlanFilters(q, 0, opts);
   const planParams = q.asset ? [...plan.params, q.asset] : plan.params;
 
   const dim = async (col) => {
     const columns = col === "state" ? ["state"] : col === "city" ? ["state", "city"] : ["state", "city", "area"];
-    const actualGroup = columns.map((name) => `a.${name}`).join(", ");
+    const actualExpr = (name) => name === "area" ? "COALESCE(a.area, 'Not specified')" : `a.${name}`;
+    const actualGroup = columns.map(actualExpr).join(", ");
     const planGroup = columns.map((name) => `p.${name}`).join(", ");
-    const actualMapKey = `concat_ws(chr(31), ${columns.map((name) => `a.${name}`).join(", ")})`;
+    const actualMapKey = `concat_ws(chr(31), ${columns.map(actualExpr).join(", ")})`;
     const planMapKey = `concat_ws(chr(31), ${columns.map((name) => `p.${name}`).join(", ")})`;
     const acts = await query(
-      `SELECT ${actualMapKey} AS map_key, a.${col} AS key,
+      `SELECT ${actualMapKey} AS map_key, ${actualExpr(col)} AS key,
               MIN(a.state) AS state, MIN(a.city) AS city,
               COUNT(DISTINCT a.shop_key)::int AS activated_shops,
               COUNT(DISTINCT a.id)::int AS activations,
@@ -117,6 +120,7 @@ async function summary(q) {
      LEFT JOIN activation_assets aa ON aa.activation_id = a.id
        ${q.asset ? "AND aa.asset_type = $" + (params.length + 1) : ""}
      WHERE u.role = 'field'
+       ${opts.ancestorId ? `AND ${descendantSql(`$${params.length}`, "u")}` : ""}
      GROUP BY u.id ORDER BY shops DESC`,
     q.asset ? [...params, q.asset] : params
   );
@@ -165,7 +169,7 @@ async function summary(q) {
 }
 
 // Manager dashboard: only salespeople assigned to the logged-in manager.
-router.get("/manager/team", requireRole("manager"), async (req, res, next) => {
+router.get("/manager/team", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const { rows } = await query(
       `SELECT
@@ -182,7 +186,7 @@ router.get("/manager/team", requireRole("manager"), async (req, res, next) => {
          ON a.user_id = u.id
          AND a.status <> 'Rejected'
        WHERE u.role = 'field'
-         AND u.manager_id = $1
+         AND ${descendantSql("$1", "u")}
        GROUP BY
          u.id,
          u.name,
@@ -220,14 +224,14 @@ router.get("/manager/team", requireRole("manager"), async (req, res, next) => {
 });
 
 // Manager: activation records for one salesperson in their own team.
-router.get("/manager/team/:userId/activations", requireRole("manager"), async (req, res, next) => {
+router.get("/manager/team/:userId/activations", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const member = await query(
       `SELECT id, name, employee_id, assigned_state, assigned_city
        FROM users
        WHERE id = $1
          AND role = 'field'
-         AND manager_id = $2`,
+         AND ${descendantSql("$2", "users")}`,
       [req.params.userId, req.user.id]
     );
 
@@ -246,6 +250,8 @@ router.get("/manager/team/:userId/activations", requireRole("manager"), async (r
          a.city,
          a.area,
          a.pharmacy_name,
+         a.party_code,
+         a.party_code_duplicate,
          a.address,
          a.latitude,
          a.longitude,
@@ -276,9 +282,10 @@ router.get("/manager/team/:userId/activations", requireRole("manager"), async (r
       [req.params.userId]
     );
 
+    const canSeePartyFlag = ["regional_head", "city_head"].includes(req.user.role);
     res.json({
       salesperson: member.rows[0],
-      activations: rows
+      activations: rows.map((row) => canSeePartyFlag ? row : { ...row, party_code_duplicate: false })
     });
   } catch (err) {
     next(err);
@@ -288,14 +295,10 @@ router.get("/manager/team/:userId/activations", requireRole("manager"), async (r
 // Managers receive the same state/city/area plan-vs-actual breakdown as admins,
 // but the server always pins it to their assigned territory. Client filters can
 // narrow the result; they can never widen it.
-router.get("/manager/summary", requireRole("manager"), async (req, res, next) => {
+router.get("/manager/summary", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
-    const scoped = {
-      ...req.query,
-      state: req.user.assigned_state,
-      city: req.user.assigned_city || req.query.city || "",
-    };
-    const data = await summary(scoped);
+    const scoped = { ...req.query };
+    const data = await summary(scoped, { ancestorId: req.user.id });
     const { bySales, ...territoryData } = data;
     res.json(territoryData);
   } catch (err) {
@@ -309,6 +312,66 @@ router.get("/summary", requireAdmin, async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+router.get("/export/performance.xlsx", requireRole("admin", ...LEADER_ROLES), async (req, res, next) => {
+  try {
+    const leader = LEADER_ROLES.includes(req.user.role);
+    const opts = leader ? { ancestorId: req.user.id } : {};
+    const data = await summary(req.query, opts);
+    const { clause, params } = buildFilters(req.query, opts);
+    const records = await query(
+      `SELECT a.code, a.occurred_at, a.party_code, a.party_code_duplicate,
+              a.pharmacy_name, a.state, a.city, a.area, a.status,
+              u.name AS salesperson, u.employee_id, u.region,
+              COALESCE(SUM(aa.quantity), 0)::int AS installed_units
+       FROM activations a
+       JOIN users u ON u.id = a.user_id
+       LEFT JOIN activation_assets aa ON aa.activation_id = a.id
+       ${clause}
+       GROUP BY a.id, u.id
+       ORDER BY a.occurred_at DESC`,
+      params
+    );
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Trade Activation Tracker";
+    workbook.created = new Date();
+    const addSheet = (name, columns, rows) => {
+      const sheet = workbook.addWorksheet(name);
+      sheet.columns = columns.map(([header, key, width = 18]) => ({ header, key, width }));
+      sheet.addRows(rows);
+      sheet.views = [{ state: "frozen", ySplit: 1 }];
+      sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
+      sheet.getRow(1).eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } };
+      });
+      return sheet;
+    };
+    addSheet("Summary", [["Metric","metric",28],["Value","value",18]], [
+      { metric: "Planned shops", value: data.totals.plannedShops },
+      { metric: "Activated shops", value: data.totals.activatedShops },
+      { metric: "Shop penetration %", value: data.totals.shopPen },
+      { metric: "Planned assets", value: data.totals.plannedAssets },
+      { metric: "Installed assets", value: data.totals.installedAssets },
+      { metric: "Asset penetration %", value: data.totals.assetPen },
+      { metric: "Activations", value: data.totals.activations },
+    ]);
+    const geographyColumns = [["State","state"],["City","city"],["Area","key"],["Planned shops","plannedShops"],["Activated shops","activatedShops"],["Shop penetration %","shopPen"],["Planned assets","plannedAssets"],["Installed assets","installed"],["Asset penetration %","assetPen"]];
+    addSheet("State Performance", geographyColumns, data.byState);
+    addSheet("City Performance", geographyColumns, data.byCity);
+    addSheet("Area Performance", geographyColumns, data.byArea);
+    addSheet("People Performance", [["Employee ID","employeeId"],["Salesperson","name",24],["City","city"],["Target","target"],["Shops","shops"],["Installed","installed"],["Completion %","completion"]], data.bySales);
+    addSheet("Asset Performance", [["Asset","label",26],["Planned","planned"],["Installed","installed"],["Remaining","remaining"],["Penetration %","pen"]], data.byAsset);
+    addSheet("Activations", [["Activation ID","code",22],["Date/time","occurred_at",22],["Region","region"],["State","state"],["City","city"],["Area","area"],["Employee ID","employee_id"],["Salesperson","salesperson",24],["Shop","pharmacy_name",30],["Party Code (Alter Code)","party_code",24],["Duplicate party code","party_code_duplicate",22],["Installed units","installed_units"],["Status","status"]],
+      records.rows.map((r) => ({ ...r, party_code_duplicate: r.party_code_duplicate ? "Flagged" : "No" })));
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", 'attachment; filename="performance-report.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) { next(err); }
 });
 
 // Personal totals for the field user dashboard.

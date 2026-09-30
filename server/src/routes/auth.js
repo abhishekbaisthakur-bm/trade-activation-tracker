@@ -20,8 +20,11 @@ const publicUser = (u) => ({
   mobile: u.mobile,
   email: u.email,
   role: u.role,
+  region: u.region,
   state: u.assigned_state,
   city: u.assigned_city,
+  managerId: u.manager_id,
+  reportingManagerName: u.reporting_manager_name || null,
   active: u.active,
 });
 

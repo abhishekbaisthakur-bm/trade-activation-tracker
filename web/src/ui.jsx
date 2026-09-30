@@ -211,7 +211,8 @@ export const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 placeholder-slate-400 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-100";
 
 export function TextInput(props) {
-  return <input {...props} className={inputCls} />;
+  const { className = "", ...rest } = props;
+  return <input {...rest} className={`${inputCls} ${className}`} />;
 }
 
 export function Select({ value, onChange, options, placeholder, disabled }) {

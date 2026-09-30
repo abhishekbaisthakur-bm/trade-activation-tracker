@@ -6,6 +6,7 @@ const { ASSETS, ASSET_KEYS, STATUSES, shopKeyOf } = require("../constants");
 const { driver, buildKey, ALLOWED_MIME } = require("../storage");
 const { buildFilters } = require("../filters");
 const { config } = require("../config");
+const { LEADER_ROLES, isLeader, descendantSql } = require("../hierarchy");
 
 const router = express.Router();
 const upload = multer({
@@ -39,9 +40,11 @@ router.post("/", requireRole("field"), upload.any(), async (req, res, next) => {
     const lng = Number(payload.longitude);
 
     // --- validation rules, enforced here and not only in the app ---
-    if (!payload.pharmacyName || !payload.state || !payload.city || !payload.area) {
-      return res.status(400).json({ error: "Pharmacy name, state, city and area are required." });
+    const partyCode = String(payload.partyCode || "").trim();
+    if (!payload.pharmacyName || !payload.state || !payload.city) {
+      return res.status(400).json({ error: "Pharmacy name, state and city are required." });
     }
+    if (!partyCode) return res.status(400).json({ error: "Party Code (Alter Code) is required." });
     if (!assets.length) {
       return res.status(400).json({ error: "Select at least one collateral asset." });
     }
@@ -70,6 +73,13 @@ router.post("/", requireRole("field"), upload.any(), async (req, res, next) => {
       return res.status(403).json({ error: "Repeat visits require manager approval." });
     }
     const duplicateOverride = false;
+    const duplicatePartyCode = await query(
+      `SELECT a.id FROM activations a
+       WHERE lower(trim(a.party_code)) = lower(trim($1)) AND a.user_id <> $2
+       ORDER BY a.occurred_at ASC LIMIT 1`,
+      [partyCode, req.user.id]
+    );
+    const duplicatePartyCodeOf = duplicatePartyCode.rows[0] ? duplicatePartyCode.rows[0].id : null;
 
     // Reject a same day repeat before writing anything, so the user gets a clear
     // message instead of a constraint error.
@@ -96,9 +106,9 @@ router.post("/", requireRole("field"), upload.any(), async (req, res, next) => {
         const nameKey = String(payload.pharmacyName).trim().toLowerCase().replace(/\s+/g, " ");
         const ph = await client.query(
           `SELECT id FROM pharmacies
-           WHERE city = $1 AND name_key = $2 AND state = $3 AND area = $4 AND active = TRUE
+           WHERE city = $1 AND name_key = $2 AND state = $3 AND area IS NOT DISTINCT FROM $4 AND active = TRUE
            LIMIT 1`,
-          [payload.city, nameKey, payload.state, payload.area]
+          [payload.city, nameKey, payload.state, payload.area || null]
         );
 
         const seq = await client.query(
@@ -109,14 +119,15 @@ router.post("/", requireRole("field"), upload.any(), async (req, res, next) => {
 
         const act = await client.query(
           `INSERT INTO activations
-             (code, user_id, pharmacy_id, pharmacy_name, shop_key, address, state, city, area,
+             (code, user_id, pharmacy_id, pharmacy_name, party_code, party_code_duplicate, duplicate_party_code_of, shop_key, address, state, city, area,
               occurred_at, occurred_on, latitude, longitude, gps_accuracy, gps_source, geo_address,
               status, duplicate_override)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CURRENT_DATE,$11,$12,$13,$14,$15,'Submitted',$16)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,CURRENT_DATE,$14,$15,$16,$17,$18,'Submitted',$19)
            RETURNING *`,
           [
-            code, req.user.id, ph.rows[0] ? ph.rows[0].id : null, String(payload.pharmacyName).trim(), shopKey,
-            payload.address || null, payload.state, payload.city, payload.area, occurredAt,
+            code, req.user.id, ph.rows[0] ? ph.rows[0].id : null, String(payload.pharmacyName).trim(),
+            partyCode, Boolean(duplicatePartyCodeOf), duplicatePartyCodeOf, shopKey,
+            payload.address || null, payload.state, payload.city, payload.area || null, occurredAt,
             lat, lng, parseInt(payload.accuracy, 10) || null, gpsSource, payload.geoAddress || null,
             duplicateOverride,
           ]
@@ -139,7 +150,7 @@ router.post("/", requireRole("field"), upload.any(), async (req, res, next) => {
                 address: payload.address || null,
                 state: payload.state,
                 city: payload.city,
-                area: payload.area,
+                area: payload.area || null,
                 latitude: lat,
                 longitude: lng,
               }),
@@ -187,12 +198,16 @@ router.post("/", requireRole("field"), upload.any(), async (req, res, next) => {
 router.get("/", async (req, res, next) => {
   try {
     const isAdmin = req.user.role === "admin";
-    const { clause, params } = buildFilters(req.query, { forceUser: isAdmin ? null : req.user.id });
+    const leader = isLeader(req.user.role);
+    const { clause, params } = buildFilters(req.query, {
+      forceUser: isAdmin || leader ? null : req.user.id,
+      ancestorId: leader ? req.user.id : null,
+    });
     const limit = Math.min(200, parseInt(req.query.limit, 10) || 50);
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
     const rows = await query(
-      `SELECT a.id, a.code, a.pharmacy_name, a.city, a.area, a.state, a.occurred_at, a.status,
+      `SELECT a.id, a.code, a.pharmacy_name, a.party_code, a.party_code_duplicate, a.city, a.area, a.state, a.occurred_at, a.status,
               a.latitude, a.longitude, a.gps_source, u.name AS user_name, u.employee_id,
               COALESCE(SUM(aa.quantity), 0)::int AS units,
               COUNT(aa.id)::int AS asset_count
@@ -209,7 +224,11 @@ router.get("/", async (req, res, next) => {
       `SELECT COUNT(DISTINCT a.id)::int AS n FROM activations a JOIN users u ON u.id = a.user_id ${clause}`,
       params
     );
-    res.json({ activations: rows.rows, total: total.rows[0].n, limit, offset });
+    const canSeePartyFlag = req.user.role === "admin" || ["regional_head", "city_head"].includes(req.user.role);
+    res.json({
+      activations: rows.rows.map((row) => canSeePartyFlag ? row : { ...row, party_code_duplicate: false }),
+      total: total.rows[0].n, limit, offset
+    });
   } catch (err) {
     next(err);
   }
@@ -247,15 +266,20 @@ router.get("/:id", async (req, res, next) => {
     const activation = await fetchActivation(req.params.id);
     if (!activation) return res.status(404).json({ error: "Activation not found." });
     let canView = req.user.role === "admin" || activation.user_id === req.user.id;
-    if (!canView && req.user.role === "manager") {
+    if (!canView && isLeader(req.user.role)) {
       const member = await query(
-        "SELECT 1 FROM users WHERE id = $1 AND manager_id = $2 AND role = 'field'",
+        `SELECT 1 FROM users u WHERE id = $1 AND role = 'field' AND ${descendantSql("$2", "u")}`,
         [activation.user_id, req.user.id]
       );
       canView = member.rows.length > 0;
     }
     if (!canView) {
       return res.status(403).json({ error: "You can only open your own activations." });
+    }
+    const canSeePartyFlag = req.user.role === "admin" || ["regional_head", "city_head"].includes(req.user.role);
+    if (!canSeePartyFlag) {
+      activation.party_code_duplicate = false;
+      activation.duplicate_party_code_of = null;
     }
     res.json({ activation });
   } catch (err) {
@@ -268,7 +292,7 @@ router.get("/:id", async (req, res, next) => {
 router.get("/:id/photo/:asset", async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT p.*, a.user_id, u.manager_id
+      `SELECT p.*, a.user_id
        FROM photos p
        JOIN activations a ON a.id = p.activation_id
        JOIN users u ON u.id = a.user_id
@@ -286,7 +310,10 @@ router.get("/:id/photo/:asset", async (req, res, next) => {
     const canView =
       req.user.role === "admin" ||
       photo.user_id === req.user.id ||
-      (req.user.role === "manager" && photo.manager_id === req.user.id);
+      (isLeader(req.user.role) && (await query(
+        `SELECT 1 FROM users u WHERE u.id = $1 AND ${descendantSql("$2", "u")}`,
+        [photo.user_id, req.user.id]
+      )).rows.length > 0);
 
     if (!canView) {
       return res.status(403).json({
@@ -307,7 +334,7 @@ router.get("/:id/photo/:asset", async (req, res, next) => {
 
 /* -------------------------------- review ------------------------------- */
 
-router.patch("/:id/status", requireRole("manager"), async (req, res, next) => {
+router.patch("/:id/status", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const status = String(req.body.status || "");
     if (!STATUSES.includes(status)) return res.status(400).json({ error: "Unknown status." });
@@ -318,7 +345,7 @@ router.patch("/:id/status", requireRole("manager"), async (req, res, next) => {
        WHERE a.id = $4
          AND u.id = a.user_id
          AND u.role = 'field'
-         AND u.manager_id = $2
+         AND ${descendantSql("$2", "u")}
        RETURNING a.id, a.code, a.status`,
       [status, req.user.id, req.body.note || null, req.params.id]
     );

@@ -18,7 +18,7 @@ function NewActivation({ user, geo, onSubmitted }) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({
     state: user.state || "", city: user.city || "", area: "",
-    pharmacyName: "", address: "", pharmacyId: null,
+    pharmacyName: "", partyCode: "", address: "", pharmacyId: null,
   });
   const [rows, setRows] = useState({});
   const [photos, setPhotos] = useState({});
@@ -70,8 +70,8 @@ function NewActivation({ user, geo, onSubmitted }) {
 
   const next = () => {
     if (step === 0) {
-      if (!form.state || !form.city || !form.area || form.pharmacyName.trim().length < 3) {
-        setError("Fill in state, city, area and the pharmacy name to continue.");
+      if (!form.state || !form.city || form.pharmacyName.trim().length < 3 || !form.partyCode.trim()) {
+        setError("Fill in state, city, pharmacy name and Party Code (Alter Code) to continue.");
         return;
       }
     }
@@ -102,9 +102,10 @@ function NewActivation({ user, geo, onSubmitted }) {
       });
       const payload = {
         pharmacyName: form.pharmacyName.trim(),
+        partyCode: form.partyCode.trim(),
         pharmacyId: form.pharmacyId,
         address: form.address.trim(),
-        state: form.state, city: form.city, area: form.area,
+        state: form.state, city: form.city, area: form.area.trim(),
         latitude: gps.lat, longitude: gps.lng, accuracy: gps.accuracy,
         gpsSource: gps.source, geoAddress: place ? place.address : "",
         assets: selected.map((k) => ({ key: k, qty: Math.max(1, toInt(rows[k].qty)) })),
@@ -163,7 +164,7 @@ function NewActivation({ user, geo, onSubmitted }) {
   />
 </Field>
 
-<Field label="Area" required>
+<Field label="Area" hint="Optional">
   <ComboInput
     value={form.area}
     onChange={(v) => set("area", v)}
@@ -180,17 +181,20 @@ function NewActivation({ user, geo, onSubmitted }) {
               <div className="-mt-2 space-y-1">
                 {suggestions.map((p) => (
                   <button key={p.id}
-                    onClick={() => { setForm((f) => ({ ...f, pharmacyName: p.name, address: p.address || "", area: p.area, pharmacyId: p.id })); setSuggestions([]); }}
+                    onClick={() => { setForm((f) => ({ ...f, pharmacyName: p.name, address: p.address || "", area: p.area || "", pharmacyId: p.id })); setSuggestions([]); }}
                     className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-teal-50">
                     <Store size={14} className="text-slate-400" />
                     <span className="truncate">
                       <span className="font-medium text-slate-800">{p.name}</span>
-                      <span className="text-slate-500"> - {p.area}</span>
+                      <span className="text-slate-500"> - {p.area || "Area not specified"}</span>
                     </span>
                   </button>
                 ))}
               </div>
             ) : null}
+            <Field label="Party Code (Alter Code)" required hint="Enter the distributor-specific party code for this activation.">
+              <TextInput value={form.partyCode} onChange={(e) => set("partyCode", e.target.value)} placeholder="Enter party code" />
+            </Field>
             <Field label="Shop address" hint="Optional">
               <TextInput value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Shop no., street" />
             </Field>
@@ -287,7 +291,8 @@ function NewActivation({ user, geo, onSubmitted }) {
               <div className="p-3">
                 <p className="text-xs text-slate-500">Shop</p>
                 <p className="font-medium text-slate-900">{form.pharmacyName}</p>
-                <p className="text-sm text-slate-600">{form.area}, {form.city}, {form.state}</p>
+                <p className="text-sm text-slate-600">{[form.area || "Not specified", form.city, form.state].join(", ")}</p>
+                <p className="mt-1 text-sm text-slate-600">Party Code (Alter Code): <span className="font-medium text-slate-900">{form.partyCode}</span></p>
               </div>
               <div className="p-3">
                 <p className="mb-2 text-xs text-slate-500">Assets</p>

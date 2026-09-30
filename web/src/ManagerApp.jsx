@@ -5,7 +5,10 @@ import { APP_NAME, BRAND_LINE, ASSETS, inputCls, Field, TextInput, Select, Combo
 
 const emptyAssets = Object.fromEntries(ASSETS.map(a => [a.key, 0]));
 const emptyTarget = () => ({ state:"", city:"", area:"", plannedShops:0, changeType:"addition", assets:{...emptyAssets} });
-const emptyField = () => ({ name:"", employeeId:"", mobile:"", email:"", state:"", city:"", password:"" });
+const emptyField = () => ({ name:"", employeeId:"", mobile:"", email:"", role:"field", managerId:"", state:"", city:"", password:"" });
+const roleLabel = (role) => ({ regional_head:"Regional Head", city_head:"City Head", team_lead:"Team Lead", field:"Salesman" }[role] || role);
+const childRoles = { regional_head:["city_head","team_lead","field"], city_head:["team_lead","field"], team_lead:["field"] };
+const parentRoles = { city_head:["regional_head"], team_lead:["regional_head","city_head"], field:["regional_head","city_head","team_lead"] };
 
 function RequestHistory({ refresh }) {
   const [items,setItems]=useState([]); const [error,setError]=useState("");
@@ -303,6 +306,9 @@ function ChangePassword({ onClose }) {
           Change password
         </Button>
       </div>
+      <Button className="mt-3" variant="ghost" size="sm" onClick={() => api.download("/analytics/export/performance.xlsx", "performance-report.xlsx", filters)}>
+        <Download size={15}/> Download Excel
+      </Button>
     </Card>
   );
 }
@@ -324,11 +330,11 @@ function ManagerPerformance({ user, geo }) {
   return <div className="space-y-4">
     <Card className="p-4">
       <p className="text-sm font-semibold text-slate-900">Territory target performance</p>
-      <p className="mt-1 text-xs text-slate-500">State: {user.state}{user.city ? ` · City: ${user.city}` : " · Entire state"}</p>
+      <p className="mt-1 text-xs text-slate-500">Scope: {user.region || "Assigned hierarchy"}{user.state ? ` · ${user.state}` : ""}{user.city ? ` · ${user.city}` : ""}</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <Field label="City">
           <Select value={filters.city} onChange={(city) => setFilters({ city, area: "" })}
-            options={geo.cities(user.state)} placeholder="All cities" disabled={!!user.city} />
+            options={geo.cities(user.state || "")} placeholder="All cities" disabled={!!user.city} />
         </Field>
         <Field label="Area">
           <Select value={filters.area} onChange={(area) => setFilters((f) => ({ ...f, area }))}
@@ -374,10 +380,10 @@ export default function ManagerApp({ user, geo, onLogout }) {
   const [showPassword, setShowPassword] = useState(false);
   const [photoUrls, setPhotoUrls] = useState({});
   const newTarget = () => ({ ...emptyTarget(), state: user.state || "", city: user.city || "" });
-  const newField = () => ({ ...emptyField(), state: user.state || "", city: user.city || "" });
+  const newField = () => ({ ...emptyField(), role: (childRoles[user.role] || ["field"])[0], managerId: user.id, state: user.state || "", city: user.city || "" });
   const [target,setTarget]=useState(newTarget), [field,setField]=useState(newField), [fieldUsers,setFieldUsers]=useState([]), [deactivateId,setDeactivateId]=useState("");
   const loadFieldUsers = useCallback(() =>
-    api.fieldUsers().then((r) => setFieldUsers(r.users)), []);
+    api.managedUsers().then((r) => setFieldUsers(r.users)), []);
   const loadTeam = useCallback(() =>
     api.managerTeam()
       .then((r) => setTeamData(r))
@@ -404,16 +410,16 @@ export default function ManagerApp({ user, geo, onLogout }) {
   setMsg(null);
 
   try {
-    await api.createFieldUser(field);
+    await api.createManagedUser(field);
 
     setMsg({
       kind: "success",
-      text: "Field user created successfully."
+      text: `${roleLabel(field.role)} created successfully.`
     });
 
     setField(newField());
 
-    const [fields, team] = await Promise.all([api.fieldUsers(), api.managerTeam()]);
+    const [fields, team] = await Promise.all([api.managedUsers(), api.managerTeam()]);
     setFieldUsers(fields.users);
     setTeamData(team);
   } catch (e) {
@@ -508,7 +514,7 @@ const deactivateFieldUser = async () => {
 
     setDeactivateId("");
 
-    const [fields, team] = await Promise.all([api.fieldUsers(), api.managerTeam()]);
+    const [fields, team] = await Promise.all([api.managedUsers(), api.managerTeam()]);
     setFieldUsers(fields.users);
     setTeamData(team);
   } catch (e) {
@@ -521,7 +527,7 @@ const deactivateFieldUser = async () => {
   }
 };
 
-const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3],['master','Master data',CheckCircle2],['field','Salesmen',Users],['target','Targets',Target],['requests','Requests',Clock]];
+const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3],['master','Master data',CheckCircle2],['field','Users',Users],['target','Targets',Target],['requests','Requests',Clock]];
   return <div className="min-h-screen bg-slate-50">
 <header className="border-b border-slate-200 bg-white">
 <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
@@ -531,7 +537,7 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 </span>
 <div>
 <p className="text-sm font-semibold">{APP_NAME}</p>
-<p className="text-xs text-slate-500">Manager workspace</p>
+<p className="text-xs text-slate-500">{roleLabel(user.role)} workspace</p>
 </div>
 </div>
 <div className="flex items-center gap-3">
@@ -610,6 +616,8 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 </div>
 <p className="mt-2 text-sm">
 <span className="font-medium">Address:</span> {a.address||'—'}</p>
+<p className="mt-1 text-sm"><span className="font-medium">Party Code (Alter Code):</span> {a.party_code||'—'}</p>
+{a.party_code_duplicate ? <div className="mt-2"><Banner kind="warn">Flagged: another salesman previously submitted this Party Code (Alter Code).</Banner></div> : null}
 <p className="mt-1 text-sm">
 <span className="font-medium">GPS:</span> {a.latitude&&a.longitude?`${a.latitude}, ${a.longitude}`:'—'}</p>
 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-y border-slate-100 py-3">
@@ -640,7 +648,8 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 <p className="mb-4 text-sm text-slate-500">Your suggestion remains pending until an Admin approves it. Approved changes are added to history and never silently overwrite old data.</p>
 <div className="grid gap-3 md:grid-cols-3">
 <Field label="State">
-<Select value={target.state} onChange={()=>{}} options={[user.state]} placeholder="Assigned state" disabled/>
+{user.state ? <Select value={target.state} onChange={()=>{}} options={[user.state]} placeholder="Assigned state" disabled/> :
+<TextInput value={target.state} onChange={e=>setTarget({...target,state:e.target.value,city:"",area:""})} placeholder="Enter state"/>}
 </Field>
 <Field label="City">
 {user.city ? <Select value={target.city} onChange={()=>{}} options={[user.city]} placeholder="Assigned city" disabled/> :
@@ -671,9 +680,20 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 </Field>
 <Button disabled={busy} onClick={()=>{const reason=document.getElementById('target-reason').value.trim();submit('target_change',target,reason)}}>{busy?<Loader2 className="animate-spin" size={15}/>:<Send size={15}/>} Submit for approval</Button>
 </Card>:null}{tab==='field'?<Card className="p-5">
-<h2 className="mb-1 text-lg font-semibold">Add field user</h2>
-<p className="mb-4 text-sm text-slate-500">Create a field salesperson and add them directly to your team.</p>
+<h2 className="mb-1 text-lg font-semibold">Add team member</h2>
+<p className="mb-4 text-sm text-slate-500">Create an account below you and select its reporting manager.</p>
 <div className="grid gap-3 md:grid-cols-2">
+<Field label="Role" required>
+<select className={inputCls} value={field.role} onChange={e=>setField({...field,role:e.target.value,managerId:user.id})}>
+{(childRoles[user.role]||[]).map(role=><option key={role} value={role}>{roleLabel(role)}</option>)}
+</select>
+</Field>
+<Field label="Reporting manager" required>
+<select className={inputCls} value={field.managerId} onChange={e=>setField({...field,managerId:e.target.value})}>
+<option value="">Select reporting manager</option>
+{fieldUsers.filter(u=>u.active&&(parentRoles[field.role]||[]).includes(u.role)).map(u=><option key={u.id} value={u.id}>{u.name} · {roleLabel(u.role)}</option>)}
+</select>
+</Field>
 <Field label="Name" required>
 <TextInput value={field.name} onChange={e=>setField({...field,name:e.target.value})}/>
 </Field>
@@ -689,20 +709,15 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 <Field label="Initial password">
 <TextInput type="password" value={field.password} onChange={e=>setField({...field,password:e.target.value})}/>
 </Field>
-<Field label="State">
-<Select value={field.state} onChange={()=>{}} options={[user.state]} placeholder="Assigned state" disabled/>
-</Field>
-<Field label="City">
-{user.city ? <Select value={field.city} onChange={()=>{}} options={[user.city]} placeholder="Assigned city" disabled/> :
-<ComboInput value={field.city} onChange={v=>setField({...field,city:v})} options={field.state ? geo.cities(field.state) : []} placeholder="Type or select city"/>}
-</Field>
+<Field label="State" required><TextInput value={field.state} onChange={e=>setField({...field,state:e.target.value})} placeholder="Enter state"/></Field>
+<Field label="City" required><TextInput value={field.city} onChange={e=>setField({...field,city:e.target.value})} placeholder="Enter city"/></Field>
 </div>
-<Button disabled={busy} onClick={createFieldUser}>{busy?<Loader2 className="animate-spin" size={15}/>:<Plus size={15}/>} Add field user</Button>
+<Button disabled={busy} onClick={createFieldUser}>{busy?<Loader2 className="animate-spin" size={15}/>:<Plus size={15}/>} Add team member</Button>
 <div className="mt-8 border-t border-slate-200 pt-5">
 <h3 className="font-semibold">Deactivate field user</h3>
 <p className="mb-3 text-sm text-slate-500">Deactivate a salesperson from your team. Their past activation history will be preserved.</p>
 <select className={inputCls} value={deactivateId} onChange={e=>setDeactivateId(e.target.value)}>
-<option value="">Select field user</option>{fieldUsers.filter(u=>u.active).map(u=>
+<option value="">Select field user</option>{fieldUsers.filter(u=>u.active&&u.role==='field').map(u=>
 <option key={u.id} value={u.id}>{u.name} ({u.employee_id})</option>)}</select>
 <div className="mt-3">
 <Button variant="danger" disabled={busy||!deactivateId} onClick={deactivateFieldUser}>{busy?<Loader2 className="animate-spin" size={15}/>:null} Deactivate field user</Button>

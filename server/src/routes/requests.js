@@ -3,6 +3,7 @@
   const { query, withTransaction } = require("../db");
   const { requireAuth, requireAdmin, requireRole, hashPassword, audit } = require("../auth");
   const { ASSET_KEYS } = require("../constants");
+  const { LEADER_ROLES, CHILD_ROLES, descendantOrSelfSql } = require("../hierarchy");
 
   const router = express.Router();
   const masterUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -20,11 +21,69 @@
 
   const publicRequest = (row) => ({ ...row, payload: withoutPassword(row.payload) });
 
-  router.get("/", requireRole("manager", "admin"), async (req, res, next) => {
+  const allowedParentRoles = {
+    city_head: ["regional_head"],
+    team_lead: ["regional_head", "city_head"],
+    field: ["regional_head", "city_head", "team_lead"],
+  };
+
+  router.get("/managed-users", requireRole(...LEADER_ROLES), async (req, res, next) => {
+    try {
+      const { rows } = await query(
+        `SELECT u.id, u.name, u.employee_id, u.role, u.region, u.assigned_state, u.assigned_city,
+                u.manager_id, u.active, manager.name AS reporting_manager_name
+         FROM users u LEFT JOIN users manager ON manager.id = u.manager_id
+         WHERE ${descendantOrSelfSql("$1", "u")}
+         ORDER BY u.active DESC, u.role, u.name`,
+        [req.user.id]
+      );
+      res.json({ users: rows });
+    } catch (err) { next(err); }
+  });
+
+  router.post("/managed-users", requireRole(...LEADER_ROLES), async (req, res, next) => {
+    try {
+      const b = req.body || {};
+      if (!b.name || !b.employeeId || !b.password) {
+        return res.status(400).json({ error: "Name, employee ID and an initial password are required." });
+      }
+      if (String(b.password).length < 8) return res.status(400).json({ error: "The initial password must be at least 8 characters." });
+      if (!(CHILD_ROLES[req.user.role] || []).includes(b.role)) {
+        return res.status(403).json({ error: "You cannot create that role." });
+      }
+      if (!b.managerId) return res.status(400).json({ error: "Select a reporting manager." });
+      if (!b.state || !b.city) return res.status(400).json({ error: "State and city are required." });
+      const parentResult = await query(
+        `SELECT u.id, u.role, u.region, u.active FROM users u
+         WHERE u.id = $1 AND ${descendantOrSelfSql("$2", "u")}`,
+        [b.managerId, req.user.id]
+      );
+      const parent = parentResult.rows[0];
+      if (!parent || !parent.active || !(allowedParentRoles[b.role] || []).includes(parent.role)) {
+        return res.status(400).json({ error: "The selected reporting manager is not eligible for this role." });
+      }
+      const { rows } = await query(
+        `INSERT INTO users
+          (name, employee_id, mobile, email, role, region, assigned_state, assigned_city, manager_id, password_hash, active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE)
+         RETURNING id, name, employee_id, mobile, email, role, region, assigned_state, assigned_city, manager_id, active`,
+        [String(b.name).trim(), String(b.employeeId).trim(), b.mobile || null, b.email || null,
+          b.role, parent.region, String(b.state).trim(), String(b.city).trim(), parent.id,
+          await hashPassword(String(b.password))]
+      );
+      await audit(req.user.id, "user.created", "user", rows[0].id, { role: b.role, managerId: parent.id });
+      res.status(201).json({ user: rows[0] });
+    } catch (err) {
+      if (err.code === "23505") return res.status(409).json({ error: "That employee ID, mobile or email is already registered." });
+      next(err);
+    }
+  });
+
+  router.get("/", requireRole(...LEADER_ROLES, "admin"), async (req, res, next) => {
     try {
       const params = [];
       let where = "WHERE 1=1";
-      if (req.user.role === "manager") { params.push(req.user.id); where += ` AND r.requested_by = $${params.length}`; }
+      if (req.user.role !== "admin") { params.push(req.user.id); where += ` AND r.requested_by = $${params.length}`; }
       if (req.query.status) { params.push(req.query.status); where += ` AND r.status = $${params.length}`; }
       const { rows } = await query(
         `SELECT r.*, u.name AS requested_by_name, u.employee_id AS requested_by_employee_id,
@@ -38,17 +97,17 @@
     } catch (err) { next(err); }
   });
 
-  router.get("/field-users", requireRole("manager", "admin"), async (req, res, next) => {
+  router.get("/field-users", requireRole(...LEADER_ROLES, "admin"), async (req, res, next) => {
     try {
       let rows;
 
-      if (req.user.role === "manager") {
+      if (req.user.role !== "admin") {
         const result = await query(
           `SELECT id, name, employee_id, mobile, email,
                   assigned_state, assigned_city, active, manager_id
           FROM users
           WHERE role = 'field'
-            AND manager_id = $1
+            AND ${descendantOrSelfSql("$1", "users")}
           ORDER BY active DESC, name`,
           [req.user.id]
         );
@@ -73,7 +132,7 @@
   });
 
 // Manager: directly create a field user in their own team.
-router.post("/field-users", requireRole("manager"), async (req, res, next) => {
+router.post("/field-users", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const b = req.body || {};
 
@@ -134,7 +193,7 @@ router.post("/field-users", requireRole("manager"), async (req, res, next) => {
 
 
 // Manager: edit a field user in their own team or reset their password.
-router.patch("/field-users/:id", requireRole("manager"), async (req, res, next) => {
+router.patch("/field-users/:id", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const b = req.body || {};
 
@@ -270,6 +329,20 @@ router.patch("/field-users/:id", requireRole("manager"), async (req, res, next) 
   }
 });
 
+router.delete("/field-users/:id", requireRole(...LEADER_ROLES), async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `UPDATE users u SET active=FALSE, updated_at=now()
+       WHERE u.id=$1 AND u.role='field' AND ${descendantOrSelfSql("$2", "u")}
+       RETURNING u.id, u.name, u.employee_id, u.active`,
+      [req.params.id, req.user.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Salesman not found below you." });
+    await audit(req.user.id, "field_user.deactivated", "user", req.params.id, null);
+    res.json({ user: rows[0] });
+  } catch (err) { next(err); }
+});
+
 function assertManagerTerritory(user, data) {
   if (user.assigned_state && data.state !== user.assigned_state) {
     throw Object.assign(new Error("This state is outside your assigned territory."), { status: 403 });
@@ -299,7 +372,7 @@ async function ensureGeography(client, state, city, area) {
 }
 
 // Manager-owned master list for direct entry, CSV import and maintenance.
-router.get("/master-pharmacies", requireRole("manager"), async (req, res, next) => {
+router.get("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const search = String(req.query.search || "").trim().toLowerCase();
     const params = [search];
@@ -314,7 +387,7 @@ router.get("/master-pharmacies", requireRole("manager"), async (req, res, next) 
   } catch (err) { next(err); }
 });
 
-router.post("/master-pharmacies", requireRole("manager"), async (req, res, next) => {
+router.post("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const p = req.body || {};
     if (!p.name || !p.state || !p.city || !p.area) {
@@ -344,7 +417,7 @@ router.post("/master-pharmacies", requireRole("manager"), async (req, res, next)
   }
 });
 
-router.patch("/master-pharmacies/:id", requireRole("manager"), async (req, res, next) => {
+router.patch("/master-pharmacies/:id", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const existing = await query("SELECT * FROM pharmacies WHERE id=$1", [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: "Shop not found." });
@@ -372,7 +445,7 @@ router.patch("/master-pharmacies/:id", requireRole("manager"), async (req, res, 
   }
 });
 
-router.delete("/master-pharmacies/:id", requireRole("manager"), async (req, res, next) => {
+router.delete("/master-pharmacies/:id", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const existing = await query("SELECT * FROM pharmacies WHERE id=$1", [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: "Shop not found." });
@@ -386,7 +459,7 @@ router.delete("/master-pharmacies/:id", requireRole("manager"), async (req, res,
   }
 });
 
-router.post("/master-pharmacies/:id/merge", requireRole("manager"), async (req, res, next) => {
+router.post("/master-pharmacies/:id/merge", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const targetId = String(req.body.targetId || "");
     if (!targetId || targetId === req.params.id) return res.status(400).json({ error: "Choose a different target shop." });
@@ -407,7 +480,7 @@ router.post("/master-pharmacies/:id/merge", requireRole("manager"), async (req, 
   }
 });
 
-router.post("/master-pharmacies/import", requireRole("manager"), masterUpload.single("file"), async (req, res, next) => {
+router.post("/master-pharmacies/import", requireRole(...LEADER_ROLES), masterUpload.single("file"), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Attach a CSV file." });
     const rows = parseCsv(req.file.buffer.toString("utf8").replace(/^\uFEFF/, ""));
@@ -446,7 +519,7 @@ router.post("/master-pharmacies/import", requireRole("manager"), masterUpload.si
 });
 
 // Manager: review new shop/geography values submitted by their own field team.
-router.get("/master-data", requireRole("manager"), async (req, res, next) => {
+router.get("/master-data", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const params = [req.user.id];
     let statusClause = "";
@@ -470,7 +543,7 @@ router.get("/master-data", requireRole("manager"), async (req, res, next) => {
   }
 });
 
-router.post("/master-data/:id/approve", requireRole("manager"), async (req, res, next) => {
+router.post("/master-data/:id/approve", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const review = await withTransaction(async (client) => {
       const found = await client.query(
@@ -499,13 +572,13 @@ router.post("/master-data/:id/approve", requireRole("manager"), async (req, res,
         [p.pharmacyName, p.nameKey, p.address || null, p.state, p.city, p.area,
          p.latitude ?? null, p.longitude ?? null, row.submitted_by]
       );
-      const plan = await client.query(
+      const plan = p.area ? await client.query(
         `INSERT INTO planned_targets (state, city, area, planned_shops)
          VALUES ($1,$2,$3,0)
          ON CONFLICT (state, city, area) DO NOTHING
          RETURNING id`,
         [p.state, p.city, p.area]
-      );
+      ) : { rows: [] };
       if (plan.rows[0]) {
         for (const key of ASSET_KEYS) {
           await client.query(
@@ -537,7 +610,7 @@ router.post("/master-data/:id/approve", requireRole("manager"), async (req, res,
   }
 });
 
-router.post("/master-data/:id/reject", requireRole("manager"), async (req, res, next) => {
+router.post("/master-data/:id/reject", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const { rows } = await query(
       `UPDATE master_data_reviews
@@ -561,7 +634,7 @@ router.post("/master-data/:id/reject", requireRole("manager"), async (req, res, 
 
 // Manager: create an approval request.
 // Target changes continue to require Admin approval.
-router.post("/", requireRole("manager"), async (req, res, next) => {
+router.post("/", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const b = req.body || {};
 
@@ -670,7 +743,7 @@ router.post("/", requireRole("manager"), async (req, res, next) => {
     if (u.role !== 'field') throw Object.assign(new Error("Only field users can be deactivated through a manager request."), { status: 400 });
     const requester = await client.query("SELECT role,assigned_state,assigned_city FROM users WHERE id=$1", [requestedBy]);
     const m = requester.rows[0];
-    if (!m || m.role !== "manager" ||
+    if (!m || !LEADER_ROLES.includes(m.role) ||
         (m.assigned_state && m.assigned_state !== u.assigned_state) ||
         (m.assigned_city && m.assigned_city !== u.assigned_city)) {
       throw Object.assign(new Error("You cannot deactivate a field user outside your territory."), { status: 403 });
@@ -680,7 +753,7 @@ router.post("/", requireRole("manager"), async (req, res, next) => {
   async function applyTargetChange(client, p, requestedBy, approvedBy) {
     const requester = await client.query("SELECT role,assigned_state,assigned_city FROM users WHERE id=$1", [requestedBy]);
     const manager = requester.rows[0];
-    if (!manager || manager.role !== "manager" || !manager.assigned_state) {
+    if (!manager || !LEADER_ROLES.includes(manager.role)) {
       throw Object.assign(new Error("The requesting manager has no assigned territory."), { status: 403 });
     }
     assertManagerTerritory(manager, p);

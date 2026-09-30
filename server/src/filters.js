@@ -1,4 +1,5 @@
 const { ASSET_KEYS, STATUSES } = require("./constants");
+const { descendantSql } = require("./hierarchy");
 
 /**
  * Turns the dashboard query string into a parameterised WHERE clause.
@@ -31,12 +32,16 @@ function buildFilters(q, opts = {}) {
     );
   }
   if (opts.forceUser) add("a.user_id = ?", opts.forceUser);
+  if (opts.ancestorId) {
+    params.push(opts.ancestorId);
+    where.push(descendantSql(`$${params.length}`, "u"));
+  }
 
   return { clause: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
 }
 
 /** Geography filters applied to the planned_targets table. */
-function buildPlanFilters(q, startIndex = 0) {
+function buildPlanFilters(q, startIndex = 0, opts = {}) {
   const where = [];
   const params = [];
   const add = (col, value) => {
@@ -46,6 +51,16 @@ function buildPlanFilters(q, startIndex = 0) {
   if (q.state) add("p.state", q.state);
   if (q.city) add("p.city", q.city);
   if (q.area) add("p.area", q.area);
+  if (opts.ancestorId) {
+    params.push(opts.ancestorId);
+    where.push(`EXISTS (
+      SELECT 1 FROM users plan_user
+      WHERE plan_user.role = 'field'
+        AND plan_user.assigned_state = p.state
+        AND plan_user.assigned_city = p.city
+        AND ${descendantSql(`$${startIndex + params.length}`, "plan_user")}
+    )`);
+  }
   return { clause: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
 }
 
