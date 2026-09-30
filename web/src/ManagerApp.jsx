@@ -315,6 +315,7 @@ function ChangePassword({ onClose }) {
 
 function ManagerPerformance({ user, geo }) {
   const [filters, setFilters] = useState({ city: user.city || "", area: "" });
+  const [peopleRole, setPeopleRole] = useState("");
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
 
@@ -367,6 +368,27 @@ function ManagerPerformance({ user, geo }) {
         { label: "Planned", right: true, render: (r) => r.plannedShops },
         { label: "Activated", right: true, render: (r) => r.activatedShops },
         { label: "Penetration", right: true, render: (r) => <PenCell value={r.shopPen}/> },
+      ]}/>
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="text-sm font-semibold">People performance</p><p className="text-xs text-slate-500">You and only the people below you in the reporting hierarchy.</p></div>
+          <select className={`${inputCls} sm:w-52`} value={peopleRole} onChange={(event)=>setPeopleRole(event.target.value)}>
+            <option value="">All hierarchy levels</option>
+            <option value="regional_head">Regional Heads</option>
+            <option value="city_head">City Heads</option>
+            <option value="team_lead">Team Leads</option>
+            <option value="field">Salesmen</option>
+          </select>
+        </div>
+      </Card>
+      <PenTable head="Hierarchy performance" rows={(data.byPeople || []).filter((person)=>!peopleRole||person.role===peopleRole)} cols={[
+        { label:"Person", render:(r)=><span><span className="font-medium">{r.name}</span><span className="block text-xs text-slate-500">{r.employeeId}</span></span> },
+        { label:"Level", render:(r)=>r.roleLabel },
+        { label:"Reports to", render:(r)=>r.reportingManager||"—" },
+        { label:"Salespeople", right:true, render:(r)=>r.teamSize },
+        { label:"Shops", right:true, render:(r)=>r.shops },
+        { label:"Assets", right:true, render:(r)=>r.installed },
+        { label:"Completion", right:true, render:(r)=><PenCell value={r.completion}/> },
       ]}/>
     </>}
   </div>;

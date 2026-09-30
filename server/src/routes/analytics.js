@@ -4,7 +4,7 @@ const { query } = require("../db");
 const { requireAuth, requireAdmin, requireRole } = require("../auth");
 const { ASSETS, ASSET_LABEL } = require("../constants");
 const { buildFilters, buildPlanFilters } = require("../filters");
-const { LEADER_ROLES, descendantSql } = require("../hierarchy");
+const { LEADER_ROLES, descendantSql, descendantOrSelfSql, ROLE_LABELS } = require("../hierarchy");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -135,6 +135,52 @@ async function summary(q, opts = {}) {
     return { id: r.id, name: r.name, employeeId: r.employee_id, city: r.city, shops: r.shops, installed: r.installed, target, completion: pct(r.shops, target) };
   });
 
+  // Every leadership row rolls up all salespeople below that person. A logged-in
+  // leader receives only their own subtree; Admin receives the full hierarchy.
+  const peopleResult = await query(
+    `SELECT u.id, u.name, u.employee_id, u.role, u.region,
+            u.assigned_state AS state, u.assigned_city AS city, u.manager_id,
+            manager.name AS reporting_manager_name
+     FROM users u
+     LEFT JOIN users manager ON manager.id = u.manager_id
+     WHERE u.active = TRUE AND u.role <> 'admin'
+       ${opts.ancestorId ? `AND ${descendantOrSelfSql("$1", "u")}` : ""}`,
+    opts.ancestorId ? [opts.ancestorId] : []
+  );
+  const people = peopleResult.rows;
+  const children = new Map();
+  people.forEach((person) => {
+    if (!children.has(person.manager_id)) children.set(person.manager_id, []);
+    children.get(person.manager_id).push(person.id);
+  });
+  const salesById = new Map(bySales.map((person) => [person.id, person]));
+  const fieldIdsBelow = (person) => {
+    if (person.role === "field") return [person.id];
+    const found = [];
+    const stack = [...(children.get(person.id) || [])];
+    while (stack.length) {
+      const id = stack.pop();
+      const child = people.find((item) => item.id === id);
+      if (!child) continue;
+      if (child.role === "field") found.push(child.id);
+      else stack.push(...(children.get(child.id) || []));
+    }
+    return found;
+  };
+  const roleOrder = { regional_head: 0, city_head: 1, team_lead: 2, field: 3 };
+  const byPeople = people.map((person) => {
+    const salespeople = fieldIdsBelow(person).map((id) => salesById.get(id)).filter(Boolean);
+    const shops = salespeople.reduce((sum, item) => sum + item.shops, 0);
+    const installed = salespeople.reduce((sum, item) => sum + item.installed, 0);
+    const target = salespeople.reduce((sum, item) => sum + item.target, 0);
+    return {
+      id: person.id, name: person.name, employeeId: person.employee_id,
+      role: person.role, roleLabel: ROLE_LABELS[person.role], region: person.region,
+      state: person.state, city: person.city, reportingManager: person.reporting_manager_name,
+      teamSize: salespeople.length, shops, installed, target, completion: pct(shops, target),
+    };
+  }).sort((a, b) => (roleOrder[a.role] - roleOrder[b.role]) || b.shops - a.shops || a.name.localeCompare(b.name));
+
   const totalsAct = await query(
     `SELECT COUNT(DISTINCT a.shop_key)::int AS shops,
             COUNT(DISTINCT a.id)::int AS activations,
@@ -164,7 +210,7 @@ async function summary(q, opts = {}) {
       activations: t.activations,
       today: t.today,
     },
-    byState, byCity, byArea, byAsset, bySales,
+    byState, byCity, byArea, byAsset, bySales, byPeople,
   };
 }
 
@@ -299,8 +345,7 @@ router.get("/manager/summary", requireRole(...LEADER_ROLES), async (req, res, ne
   try {
     const scoped = { ...req.query };
     const data = await summary(scoped, { ancestorId: req.user.id });
-    const { bySales, ...territoryData } = data;
-    res.json(territoryData);
+    res.json(data);
   } catch (err) {
     next(err);
   }
@@ -362,7 +407,7 @@ router.get("/export/performance.xlsx", requireRole("admin", ...LEADER_ROLES), as
     addSheet("State Performance", geographyColumns, data.byState);
     addSheet("City Performance", geographyColumns, data.byCity);
     addSheet("Area Performance", geographyColumns, data.byArea);
-    addSheet("People Performance", [["Employee ID","employeeId"],["Salesperson","name",24],["City","city"],["Target","target"],["Shops","shops"],["Installed","installed"],["Completion %","completion"]], data.bySales);
+    addSheet("People Performance", [["Employee ID","employeeId"],["Name","name",24],["Role","roleLabel"],["Reports to","reportingManager",24],["Region","region"],["State","state"],["City","city"],["Salespeople below","teamSize"],["Target","target"],["Shops","shops"],["Installed","installed"],["Completion %","completion"]], data.byPeople);
     addSheet("Asset Performance", [["Asset","label",26],["Planned","planned"],["Installed","installed"],["Remaining","remaining"],["Penetration %","pen"]], data.byAsset);
     addSheet("Activations", [["Activation ID","code",22],["Date/time","occurred_at",22],["Region","region"],["State","state"],["City","city"],["Area","area"],["Employee ID","employee_id"],["Salesperson","salesperson",24],["Shop","pharmacy_name",30],["Party Code (Alter Code)","party_code",24],["Duplicate party code","party_code_duplicate",22],["Installed units","installed_units"],["Status","status"]],
       records.rows.map((r) => ({ ...r, party_code_duplicate: r.party_code_duplicate ? "Flagged" : "No" })));

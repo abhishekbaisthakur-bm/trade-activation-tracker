@@ -586,6 +586,8 @@ export function AdminOverview({ a }) {
 
 
 export function AdminAnalytics({ a }) {
+  const [peopleRole, setPeopleRole] = useState("");
+  const people = (a.byPeople || a.bySales || []).filter((person) => !peopleRole || person.role === peopleRole);
   return (
     <div className="space-y-4">
       <PenTable
@@ -622,18 +624,30 @@ export function AdminAnalytics({ a }) {
           { label: "Asset penetration", right: true, render: (r) => <PenCell value={r.assetPen} /> },
         ]}
       />
+      <div className="flex justify-end">
+        <select value={peopleRole} onChange={(event) => setPeopleRole(event.target.value)} className={`${inputCls} sm:w-56`}>
+          <option value="">All hierarchy levels</option>
+          <option value="regional_head">Regional Heads</option>
+          <option value="city_head">City Heads</option>
+          <option value="team_lead">Team Leads</option>
+          <option value="field">Salesmen</option>
+        </select>
+      </div>
       <PenTable
-        head="Salesperson performance"
-        rows={a.bySales}
+        head="People performance"
+        rows={people}
         cols={[
-          { label: "Salesperson", render: (r) => (<span><span className="font-medium text-slate-900">{r.name}</span><span className="block text-xs text-slate-500">{r.employeeId}</span></span>) },
-          { label: "City", render: (r) => r.city },
+          { label: "Person", render: (r) => (<span><span className="font-medium text-slate-900">{r.name}</span><span className="block text-xs text-slate-500">{r.employeeId}</span></span>) },
+          { label: "Level", render: (r) => r.roleLabel || "Salesman" },
+          { label: "Reports to", render: (r) => r.reportingManager || "—" },
+          { label: "Scope", render: (r) => [r.region, r.city, r.state].filter(Boolean).join(" · ") || "—" },
+          { label: "Salespeople", right: true, render: (r) => r.teamSize ?? 1 },
           { label: "Shops activated", right: true, render: (r) => r.shops },
           { label: "Assets installed", right: true, render: (r) => r.installed },
           { label: "Completion", right: true, render: (r) => <PenCell value={r.completion} /> },
         ]}
       />
-      <p className="text-xs text-slate-500">Salesperson completion compares shops activated against an equal share of the planned shops in their assigned city.</p>
+      <p className="text-xs text-slate-500">Leader rows aggregate the salespeople below them. Salesman targets are based on an equal share of planned shops in their assigned city.</p>
     </div>
   );
 }
