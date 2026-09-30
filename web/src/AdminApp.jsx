@@ -39,6 +39,17 @@ function FilterBar({ geo, users, f, setF }) {
   );
 }
 
+function ExcelExport({ filters }) {
+  return (
+    <div className="flex justify-end">
+      <Button variant="ghost" size="sm"
+        onClick={() => api.download("/analytics/export/performance.xlsx", "performance-report.xlsx", filters)}>
+        <Download size={15} /> Download Excel
+      </Button>
+    </div>
+  );
+}
+
 /* ---------------------------- record detail ----------------------------- */
 
 function RecordDetail({ id, onClose }) {
@@ -168,10 +179,13 @@ function AdminRecords({ filters, refreshKey }) {
 
   return (
     <div className="space-y-3">
-      <div className="relative">
-        <Search size={16} className="absolute left-3 top-3 text-slate-400" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by activation ID, shop, city or salesperson" className={inputCls + " pl-9"} />
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3 top-3 text-slate-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by activation ID, shop, city or salesperson" className={inputCls + " pl-9"} />
+        </div>
+        <ExcelExport filters={{ ...filters, search }} />
       </div>
       {error ? <Banner kind="error">{error}</Banner> : null}
       <Card className="overflow-hidden">
@@ -311,10 +325,7 @@ function AdminPlan({ a, planCount, filters, onPlansChanged }) {
         onClick={() => api.download("/analytics/export/plan-vs-actual.csv", "plan-vs-actual.csv", filters)}>
         <Download size={15} /> Export plan vs actual
       </Button>
-      <Button variant="ghost" size="sm"
-        onClick={() => api.download("/analytics/export/performance.xlsx", "performance-report.xlsx", filters)}>
-        <Download size={15} /> Download Excel
-      </Button>
+      <ExcelExport filters={filters} />
     </div>
   );
 }
@@ -734,6 +745,7 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
 
       <main className="mx-auto max-w-7xl space-y-4 px-4 py-5">
         {tab !== "data" && tab !== "approvals" ? <FilterBar geo={geo} users={users} f={f} setF={setF} /> : null}
+        {(tab === "overview" || tab === "analytics") ? <ExcelExport filters={f} /> : null}
         {error ? <Banner kind="error">{error}</Banner> : null}
 
         {tab !== "data" && tab !== "approvals" && tab !== "records" && !a ? (
