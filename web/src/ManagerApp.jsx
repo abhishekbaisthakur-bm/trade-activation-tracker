@@ -43,6 +43,36 @@ function RequestHistory({ refresh }) {
 </div>
 }
 
+function ReadOnlyMasterList() {
+  const [shops, setShops] = useState([]);
+  const [search, setSearch] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    const timer = setTimeout(() => api.masterPharmacies(search).then((result) => {
+      if (live) { setShops(result.pharmacies); setError(""); }
+    }).catch((e) => live && setError(e.message)), search ? 250 : 0);
+    return () => { live = false; clearTimeout(timer); };
+  }, [search]);
+  return <div className="space-y-3">
+    {error ? <Banner kind="error">{error}</Banner> : null}
+    <Card className="overflow-hidden">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h3 className="text-sm font-semibold">Master list</h3>
+        <p className="text-xs text-slate-500">Read-only pharmacies for your assigned location.</p>
+        <TextInput value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Search pharmacy, RIO ID, Party/Alt Code or city" className="mt-3"/>
+      </div>
+      <div className="overflow-x-auto"><table className="w-full text-sm">
+        <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">Pharmacy</th><th className="px-3 py-2">Geography</th><th className="px-3 py-2">Status</th></tr></thead>
+        <tbody className="divide-y divide-slate-100">{shops.map((shop)=><tr key={shop.id}>
+          <td className="px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_code||"—"}</p><p className="text-xs text-slate-500">{shop.address||"—"}</p></td>
+          <td className="px-3 py-2">{[shop.city,shop.state].filter(Boolean).join(", ")||"—"}</td><td className="px-3 py-2">{shop.active?"Active":"Inactive"}</td>
+        </tr>)}{!shops.length?<tr><td colSpan="3" className="px-4 py-8 text-center text-slate-400">No master shops found for your location.</td></tr>:null}</tbody>
+      </table></div>
+    </Card>
+  </div>;
+}
+
 function MasterDataReviews({ canManage }) {
   const [items, setItems] = useState([]);
   const [shops, setShops] = useState([]);
@@ -545,7 +575,7 @@ const deactivateFieldUser = async () => {
   }
 };
 
-const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3],['master','Master data',CheckCircle2],['field','Users',Users],...(user.role==='regional_head'?[['target','Targets',Target]]:[]),['requests','Requests',Clock]];
+const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3],['master',user.role==='regional_head'?'Master data':'Master list',CheckCircle2],['field','Users',Users],...(user.role==='regional_head'?[['target','Targets',Target]]:[]),['requests','Requests',Clock]];
   return <div className="min-h-screen bg-slate-50">
 <header className="border-b border-slate-200 bg-white">
 <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
@@ -661,7 +691,7 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 <img src={photoUrl} alt={`${x.assetType} proof`} className="h-40 w-full rounded-lg border border-slate-200 object-cover"/>
 <p className="mt-1 text-xs text-teal-700">Click photo to view full size</p>
 </a>:x.hasPhoto?<p className="mt-2 text-xs text-slate-500">Loading photo...</p>:<p className="mt-2 text-xs text-slate-400">No proof photo</p>}</div>})}</div>:<p className="mt-1 text-sm text-slate-500">None</p>}</div>
-</div>)}</div>:<div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">No activations yet for this salesperson.</div>:<div className="py-8 text-center text-sm text-slate-500">Loading activation details...</div>}</Card>:null}</div>:null}{tab==='performance'?<ManagerPerformance user={user} geo={geo}/>:null}{tab==='master'?<MasterDataReviews canManage={user.role==='regional_head'}/>:null}{tab==='requests'?<RequestHistory refresh={refresh}/>:null}{tab==='target'&&user.role==='regional_head'?<Card className="p-5">
+</div>)}</div>:<div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">No activations yet for this salesperson.</div>:<div className="py-8 text-center text-sm text-slate-500">Loading activation details...</div>}</Card>:null}</div>:null}{tab==='performance'?<ManagerPerformance user={user} geo={geo}/>:null}{tab==='master'?(user.role==='regional_head'?<MasterDataReviews canManage/>:<ReadOnlyMasterList/>):null}{tab==='requests'?<RequestHistory refresh={refresh}/>:null}{tab==='target'&&user.role==='regional_head'?<Card className="p-5">
 <h2 className="mb-1 text-lg font-semibold">Suggest a target change</h2>
 <p className="mb-4 text-sm text-slate-500">Your suggestion remains pending until an Admin approves it. Approved changes are added to history and never silently overwrite old data.</p>
 <div className="grid gap-3 md:grid-cols-3">
