@@ -441,7 +441,10 @@ export default function ManagerApp({ user, geo, onLogout }) {
   useEffect(() => {
     loadTeam();
     const refreshVisible = () => {
-      if (document.visibilityState !== "hidden") loadTeam();
+      if (document.visibilityState !== "hidden") {
+        loadTeam();
+        loadFieldUsers().catch(() => {});
+      }
     };
     const interval = window.setInterval(refreshVisible, 30000);
     window.addEventListener("focus", refreshVisible);
@@ -451,7 +454,7 @@ export default function ManagerApp({ user, geo, onLogout }) {
       window.removeEventListener("focus", refreshVisible);
       document.removeEventListener("visibilitychange", refreshVisible);
     };
-  }, [loadTeam]);
+  }, [loadTeam, loadFieldUsers]);
   const submit=async(type,payload,reason)=>{ setBusy(true);setMsg(null);try{await api.createRequest(type,payload,reason);setMsg({kind:'success',text:'Request submitted for admin approval. No live data has changed.'});setRefresh(x=>x+1);if(type==='target_change')setTarget(newTarget());if(type==='user_create')setField(newField());}catch(e){setMsg({kind:'error',text:e.message})}finally{setBusy(false)}};
   const createFieldUser = async () => {
   setBusy(true);
@@ -761,6 +764,17 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 <Field label="City" required><TextInput value={field.city} onChange={e=>setField({...field,city:e.target.value})} placeholder="Enter city"/></Field>
 </div>
 <Button disabled={busy} onClick={createFieldUser}>{busy?<Loader2 className="animate-spin" size={15}/>:<Plus size={15}/>} Add team member</Button>
+<div className="mt-8 border-t border-slate-200 pt-5">
+<div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="font-semibold">My reporting hierarchy</h3><p className="text-sm text-slate-500">Everyone assigned below you, including indirect reports.</p></div><Button variant="ghost" size="sm" onClick={()=>loadFieldUsers().catch(e=>setMsg({kind:'error',text:e.message}))}>Refresh</Button></div>
+<div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full text-sm">
+<thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Reports to</th><th className="px-3 py-2">Territory</th><th className="px-3 py-2">Status</th></tr></thead>
+<tbody className="divide-y divide-slate-100">{fieldUsers.filter(u=>u.id!==user.id).map(u=><tr key={u.id}>
+<td className="px-3 py-2"><span className="font-medium">{u.name}</span><span className="block text-xs text-slate-500">{u.employee_id}</span></td>
+<td className="px-3 py-2">{roleLabel(u.role)}</td><td className="px-3 py-2">{u.reporting_manager_name||'—'}</td>
+<td className="px-3 py-2">{[u.assigned_city,u.assigned_state,u.region].filter(Boolean).join(', ')||'—'}</td><td className="px-3 py-2">{u.active?'Active':'Inactive'}</td>
+</tr>)}{!fieldUsers.some(u=>u.id!==user.id)?<tr><td colSpan="5" className="px-3 py-8 text-center text-slate-400">No users are currently assigned below you.</td></tr>:null}</tbody>
+</table></div>
+</div>
 <div className="mt-8 border-t border-slate-200 pt-5">
 <h3 className="font-semibold">Deactivate field user</h3>
 <p className="mb-3 text-sm text-slate-500">Deactivate a salesperson from your team. Their past activation history will be preserved.</p>
