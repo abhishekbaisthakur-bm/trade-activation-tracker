@@ -336,7 +336,7 @@ const emptyUser = { name: "", employeeId: "", mobile: "", email: "", role: "fiel
 const roleLabel = (role) => ({ admin: "Admin", regional_head: "Regional Head", city_head: "City Head", team_lead: "Team Lead", field: "Salesman" }[role] || role);
 const parentRoles = { city_head: ["regional_head"], team_lead: ["regional_head", "city_head"], field: ["regional_head", "city_head", "team_lead"] };
 
-function AdminData({ geo, users, filters, onUsersChanged }) {
+function AdminData({ geo, users, filters, onUsersChanged, masterAdmin }) {
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState(emptyUser);
   const [err, setErr] = useState("");
@@ -389,7 +389,8 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
 
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <h3 className="text-sm font-semibold text-slate-900">Field users and managers</h3>
+          <div><h3 className="text-sm font-semibold text-slate-900">Users and reporting hierarchy</h3>
+            <p className="text-xs text-slate-500">Only ADMIN001 can create or manage Admin accounts.</p></div>
           <Button size="sm" onClick={() => { setDraft(emptyUser); setEditing("new"); setErr(""); }}>
             <Plus size={15} /> Add user
           </Button>
@@ -425,9 +426,9 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                    <button onClick={() => { setDraft({ ...u, password: "" }); setEditing(u.id); setErr(""); }}
+                    {(u.role !== "admin" || masterAdmin) ? <button onClick={() => { setDraft({ ...u, password: "" }); setEditing(u.id); setErr(""); }}
                       className="mr-3 text-xs font-medium text-teal-700 hover:underline">Edit</button>
-                    {u.active ? (
+                    : null}{u.active && (u.role !== "admin" || masterAdmin) && u.employeeId !== "ADMIN001" ? (
                       <button onClick={() => deactivate(u.id)} className="text-xs font-medium text-rose-600 hover:underline">Deactivate</button>
                     ) : null}
                   </td>
@@ -457,7 +458,7 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
                   <option value="team_lead">Team Lead</option>
                   <option value="city_head">City Head</option>
                   <option value="regional_head">Regional Head</option>
-                  <option value="admin">Admin</option>
+                  {masterAdmin ? <option value="admin">Admin</option> : null}
                 </select>
               </Field>
               <Field label={editing === "new" ? "Initial password" : "Reset password"}
@@ -498,6 +499,45 @@ function AdminData({ geo, users, filters, onUsersChanged }) {
       ) : null}
     </div>
   );
+}
+
+function AdminAuditLog() {
+  const [data, setData] = useState({ entries: [], total: 0 });
+  const [search, setSearch] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const limit = 50;
+  useEffect(() => { setOffset(0); }, [search]);
+  useEffect(() => {
+    let live = true;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      api.auditLog({ search, limit, offset }).then((result) => {
+        if (live) { setData(result); setError(""); }
+      }).catch((e) => live && setError(e.message)).finally(() => live && setLoading(false));
+    }, search ? 250 : 0);
+    return () => { live = false; clearTimeout(timer); };
+  }, [search, offset]);
+  const actionLabel = (action) => String(action || "").split(".").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" · ");
+  return <div className="space-y-3">
+    <Card className="p-4"><h2 className="font-semibold">Activity log</h2><p className="mt-1 text-sm text-slate-500">A chronological record of account, target, master-data and activation changes.</p>
+      <div className="relative mt-3"><Search size={16} className="absolute left-3 top-3 text-slate-400"/><input className={inputCls+" pl-9"} value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Search person, employee ID, action or record ID"/></div>
+    </Card>
+    {error?<Banner kind="error">{error}</Banner>:null}
+    <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
+      <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-4 py-2">Date and time</th><th className="px-4 py-2">Changed by</th><th className="px-4 py-2">Action</th><th className="px-4 py-2">Record</th><th className="px-4 py-2">Details</th></tr></thead>
+      <tbody className="divide-y divide-slate-100">{loading?<tr><td colSpan="5" className="px-4 py-10 text-center text-slate-400"><Loader2 className="mx-auto animate-spin"/></td></tr>:data.entries.map((entry)=><tr key={entry.id}>
+        <td className="whitespace-nowrap px-4 py-3">{new Date(entry.created_at).toLocaleString()}</td>
+        <td className="px-4 py-3"><span className="font-medium">{entry.actor_name||"System"}</span><span className="block text-xs text-slate-500">{entry.actor_employee_id||"—"}</span></td>
+        <td className="px-4 py-3 font-medium">{actionLabel(entry.action)}</td>
+        <td className="px-4 py-3"><span className="capitalize">{String(entry.entity||"").replaceAll("_"," ")}</span><span className="block max-w-48 truncate text-xs text-slate-500" title={entry.entity_id||""}>{entry.entity_id||"—"}</span></td>
+        <td className="px-4 py-3"><code className="block max-w-md whitespace-pre-wrap break-words text-xs text-slate-600">{entry.detail?JSON.stringify(entry.detail):"—"}</code></td>
+      </tr>)}{!loading&&!data.entries.length?<tr><td colSpan="5" className="px-4 py-10 text-center text-slate-400">No activity matches this search.</td></tr>:null}</tbody>
+    </table></div>
+    <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>{data.total.toLocaleString("en-IN")} changes</span><div className="flex gap-2"><Button size="sm" variant="ghost" disabled={offset===0} onClick={()=>setOffset(Math.max(0,offset-limit))}>Previous</Button><Button size="sm" variant="ghost" disabled={offset+limit>=data.total} onClick={()=>setOffset(offset+limit)}>Next</Button></div></div>
+    </Card>
+  </div>;
 }
 
 
@@ -711,6 +751,7 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
     { key: "plan", label: "Plan vs actual", icon: Target },
     { key: "data", label: "Data", icon: Users },
     { key: "approvals", label: "Approvals", icon: ClipboardCheck },
+    { key: "activity", label: "Activity log", icon: Clock },
   ];
 
   return (
@@ -744,11 +785,11 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
       </header>
 
       <main className="mx-auto max-w-7xl space-y-4 px-4 py-5">
-        {tab !== "data" && tab !== "approvals" ? <FilterBar geo={geo} users={users} f={f} setF={setF} /> : null}
+        {tab !== "data" && tab !== "approvals" && tab !== "activity" ? <FilterBar geo={geo} users={users} f={f} setF={setF} /> : null}
         {(tab === "overview" || tab === "analytics") ? <ExcelExport filters={f} /> : null}
         {error ? <Banner kind="error">{error}</Banner> : null}
 
-        {tab !== "data" && tab !== "approvals" && tab !== "records" && !a ? (
+        {tab !== "data" && tab !== "approvals" && tab !== "activity" && tab !== "records" && !a ? (
           <div className="flex justify-center py-16 text-slate-400"><Loader2 className="animate-spin" /></div>
         ) : null}
 
@@ -761,9 +802,10 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
           <AdminPlan a={a} planCount={planCount} filters={f} onPlansChanged={onPlansChanged} />
         ) : null}
         {tab === "data" ? (
-          <AdminData geo={geo} users={users} filters={f} onUsersChanged={() => { loadUsers(); setRefreshKey((key) => key + 1); }} />
+          <AdminData geo={geo} users={users} filters={f} masterAdmin={user.employeeId === "ADMIN001"} onUsersChanged={() => { loadUsers(); setRefreshKey((key) => key + 1); }} />
         ) : null}
         {tab === "approvals" ? <AdminApprovals onApproved={() => { onPlansChanged(); loadUsers(); setRefreshKey((k) => k + 1); }} /> : null}
+        {tab === "activity" ? <AdminAuditLog /> : null}
       </main>
     </div>
   );

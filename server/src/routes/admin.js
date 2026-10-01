@@ -7,6 +7,7 @@ const { publicUser } = require("./auth");
 const { ALL_ROLES } = require("../hierarchy");
 
 const router = express.Router();
+const MASTER_ADMIN_EMPLOYEE_ID = "ADMIN001";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const validRole = (role) => (ALL_ROLES.includes(role) ? role : "field");
@@ -38,6 +39,33 @@ async function resolveHierarchy(role, values) {
 
 router.use(requireAuth);
 
+const isMasterAdmin = (user) => user.role === "admin" && user.employee_id === MASTER_ADMIN_EMPLOYEE_ID;
+
+router.get("/audit-log", requireAdmin, async (req, res, next) => {
+  try {
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    const search = String(req.query.search || "").trim().toLowerCase();
+    const params = [search];
+    const where = `WHERE log.action NOT LIKE 'login.%' AND ($1::text = '' OR lower(COALESCE(actor.name,'')) LIKE '%' || $1 || '%'
+      OR lower(COALESCE(actor.employee_id,'')) LIKE '%' || $1 || '%'
+      OR lower(log.action) LIKE '%' || $1 || '%' OR lower(log.entity) LIKE '%' || $1 || '%'
+      OR lower(COALESCE(log.entity_id,'')) LIKE '%' || $1 || '%'
+      OR lower(COALESCE(log.detail::text,'')) LIKE '%' || $1 || '%')`;
+    const [items, total] = await Promise.all([
+      query(
+        `SELECT log.id, log.action, log.entity, log.entity_id, log.detail, log.created_at,
+                actor.name AS actor_name, actor.employee_id AS actor_employee_id, actor.role AS actor_role
+         FROM audit_log log LEFT JOIN users actor ON actor.id=log.actor_id
+         ${where} ORDER BY log.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+        params
+      ),
+      query(`SELECT COUNT(*)::int AS count FROM audit_log log LEFT JOIN users actor ON actor.id=log.actor_id ${where}`, params),
+    ]);
+    res.json({ entries: items.rows, total: total.rows[0].count, limit, offset });
+  } catch (err) { next(err); }
+});
+
 /* -------------------------------- users -------------------------------- */
 
 router.get("/users", requireAdmin, async (req, res, next) => {
@@ -63,6 +91,9 @@ router.post("/users", requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: "The initial password must be at least 8 characters." });
     }
     const role = validRole(b.role);
+    if (role === "admin" && !isMasterAdmin(req.user)) {
+      return res.status(403).json({ error: "Only ADMIN001 can create additional Admin accounts." });
+    }
     const hierarchy = await resolveHierarchy(role, b);
     const { rows } = await query(
       `INSERT INTO users (name, employee_id, mobile, email, role, region, assigned_state, assigned_city, manager_id, password_hash, active)
@@ -98,10 +129,16 @@ router.patch("/users/:id", requireAdmin, async (req, res, next) => {
     if (req.params.id === req.user.id && (b.role !== undefined || b.active === false)) {
       return res.status(400).json({ error: "You cannot change your own role or deactivate your own account." });
     }
-    const currentResult = await query("SELECT role, region, assigned_state, assigned_city, manager_id FROM users WHERE id = $1", [req.params.id]);
+    const currentResult = await query("SELECT role, employee_id, region, assigned_state, assigned_city, manager_id FROM users WHERE id = $1", [req.params.id]);
     if (!currentResult.rows.length) return res.status(404).json({ error: "User not found." });
     const current = currentResult.rows[0];
     const nextRole = b.role !== undefined ? validRole(b.role) : current.role;
+    if (current.employee_id === MASTER_ADMIN_EMPLOYEE_ID && (nextRole !== "admin" || b.active === false || (b.employeeId && b.employeeId !== MASTER_ADMIN_EMPLOYEE_ID))) {
+      return res.status(403).json({ error: "The ADMIN001 master-admin account cannot be demoted, deactivated or renamed." });
+    }
+    if (!isMasterAdmin(req.user) && (current.role === "admin" || nextRole === "admin")) {
+      return res.status(403).json({ error: "Only ADMIN001 can manage Admin accounts." });
+    }
     const hierarchy = await resolveHierarchy(nextRole, {
       region: b.region !== undefined ? b.region : current.region,
       state: b.state !== undefined ? b.state : current.assigned_state,
@@ -155,6 +192,10 @@ router.delete("/users/:id", requireAdmin, async (req, res, next) => {
     if (req.params.id === req.user.id) {
       return res.status(400).json({ error: "You cannot deactivate your own account." });
     }
+    const target = await query("SELECT role, employee_id FROM users WHERE id=$1", [req.params.id]);
+    if (!target.rows.length) return res.status(404).json({ error: "User not found." });
+    if (target.rows[0].employee_id === MASTER_ADMIN_EMPLOYEE_ID) return res.status(403).json({ error: "The ADMIN001 master-admin account cannot be deactivated." });
+    if (target.rows[0].role === "admin" && !isMasterAdmin(req.user)) return res.status(403).json({ error: "Only ADMIN001 can manage Admin accounts." });
     const { rows } = await query(
       "UPDATE users SET active = FALSE, updated_at = now() WHERE id = $1 RETURNING *",
       [req.params.id]

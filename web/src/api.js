@@ -94,6 +94,7 @@ export const api = {
   createUser: (user) => request("/admin/users", { method: "POST", body: user }),
   updateUser: (id, patch) => request(`/admin/users/${id}`, { method: "PATCH", body: patch }),
   deactivateUser: (id) => request(`/admin/users/${id}`, { method: "DELETE" }),
+  auditLog: (params) => request(`/admin/audit-log${qs(params)}`),
 
   plans: () => request("/admin/plans"),
   importPlans: (file, replace = true) => {
