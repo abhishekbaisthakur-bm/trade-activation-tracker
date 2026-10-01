@@ -174,7 +174,7 @@ router.get("/pharmacies", async (req, res, next) => {
     const search = String(req.query.search || "").trim().toLowerCase();
     const city = req.query.city || null;
     const { rows } = await query(
-      `SELECT id, name, address, state, city, area, latitude, longitude
+      `SELECT id, name, rio_id, party_alt_code, address, state, city, area, latitude, longitude
        FROM pharmacies
        WHERE active = TRUE
          AND ($1::text IS NULL OR city = $1)
@@ -191,16 +191,18 @@ router.get("/pharmacies", async (req, res, next) => {
 router.post("/pharmacies", requireAdmin, async (req, res, next) => {
   try {
     const b = req.body || {};
-    if (!b.name || !b.state || !b.city || !b.area) {
-      return res.status(400).json({ error: "Name, state, city and area are required." });
+    if (!b.name || !b.rioId || !b.partyAltCode) {
+      return res.status(400).json({ error: "Pharmacy Name, RIO ID and Party/Alt Code are required." });
     }
     const nameKey = String(b.name).trim().toLowerCase().replace(/\s+/g, " ");
     const { rows } = await query(
-      `INSERT INTO pharmacies (name, name_key, address, state, city, area, latitude, longitude, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       ON CONFLICT (city, name_key) DO UPDATE SET address = EXCLUDED.address, area = EXCLUDED.area
+      `INSERT INTO pharmacies (name, name_key, rio_id, party_alt_code, address, state, city, area, latitude, longitude, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,$9,$10)
+       ON CONFLICT (rio_id) WHERE rio_id IS NOT NULL DO UPDATE SET name=EXCLUDED.name,name_key=EXCLUDED.name_key,
+         party_alt_code=EXCLUDED.party_alt_code,address=EXCLUDED.address,state=EXCLUDED.state,city=EXCLUDED.city
        RETURNING *`,
-      [b.name.trim(), nameKey, b.address || null, b.state, b.city, b.area, b.latitude || null, b.longitude || null, req.user.id]
+      [b.name.trim(), nameKey, String(b.rioId).trim().toUpperCase(), String(b.partyAltCode).trim(),
+       b.address || null, b.state || null, b.city || null, b.latitude || null, b.longitude || null, req.user.id]
     );
     res.status(201).json({ pharmacy: rows[0] });
   } catch (err) {

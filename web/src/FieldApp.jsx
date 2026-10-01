@@ -181,7 +181,7 @@ function NewActivation({ user, geo, onSubmitted }) {
               <div className="-mt-2 space-y-1">
                 {suggestions.map((p) => (
                   <button key={p.id}
-                    onClick={() => { setForm((f) => ({ ...f, pharmacyName: p.name, address: p.address || "", area: p.area || "", pharmacyId: p.id })); setSuggestions([]); }}
+                    onClick={() => { setForm((f) => ({ ...f, pharmacyName: p.name, partyCode: p.party_alt_code || f.partyCode, address: p.address || "", area: p.area || "", pharmacyId: p.id })); setSuggestions([]); }}
                     className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-teal-50">
                     <Store size={14} className="text-slate-400" />
                     <span className="truncate">

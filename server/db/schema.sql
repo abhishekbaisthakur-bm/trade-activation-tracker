@@ -22,9 +22,11 @@ CREATE TABLE IF NOT EXISTS pharmacies (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name        TEXT NOT NULL,
   name_key    TEXT NOT NULL,
+  rio_id      TEXT UNIQUE,
+  party_alt_code TEXT,
   address     TEXT,
-  state       TEXT NOT NULL,
-  city        TEXT NOT NULL,
+  state       TEXT,
+  city        TEXT,
   area        TEXT,
   latitude    DOUBLE PRECISION,
   longitude   DOUBLE PRECISION,
@@ -36,6 +38,11 @@ CREATE TABLE IF NOT EXISTS pharmacies (
 CREATE INDEX IF NOT EXISTS pharmacies_city_idx ON pharmacies (city, area);
 
 ALTER TABLE pharmacies ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE pharmacies ADD COLUMN IF NOT EXISTS rio_id TEXT;
+ALTER TABLE pharmacies ADD COLUMN IF NOT EXISTS party_alt_code TEXT;
+ALTER TABLE pharmacies ALTER COLUMN state DROP NOT NULL;
+ALTER TABLE pharmacies ALTER COLUMN city DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS pharmacies_rio_id_key ON pharmacies (rio_id) WHERE rio_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS planned_targets (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

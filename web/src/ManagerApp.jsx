@@ -49,7 +49,7 @@ function MasterDataReviews() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
   const [mergeTargets, setMergeTargets] = useState({});
-  const [draft, setDraft] = useState({ name:"", address:"", state:"", city:"", area:"", latitude:"", longitude:"" });
+  const [draft, setDraft] = useState({ name:"", rioId:"", partyAltCode:"", address:"", state:"", city:"" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -80,17 +80,17 @@ function MasterDataReviews() {
     }
   };
 
-  const resetDraft = () => { setEditing(null); setDraft({ name:"", address:"", state:"", city:"", area:"", latitude:"", longitude:"" }); };
+  const resetDraft = () => { setEditing(null); setDraft({ name:"", rioId:"", partyAltCode:"", address:"", state:"", city:"" }); };
   const saveShop = async () => {
     setBusy("save"); setError("");
     try {
-      const payload = { ...draft, latitude: draft.latitude === "" ? null : Number(draft.latitude), longitude: draft.longitude === "" ? null : Number(draft.longitude) };
+      const payload = { ...draft };
       if (editing) await api.updateMasterPharmacy(editing, payload); else await api.saveMasterPharmacy(payload);
       resetDraft(); await load();
     } catch (e) { setError(e.message); } finally { setBusy(""); }
   };
   const template = () => {
-    const csv = "Name,Address,State,City,Area,Latitude,Longitude\nExample Pharmacy,Shop address,Maharashtra,Mumbai,Andheri West,19.1197,72.8468\n";
+    const csv = "Pharmacy Name,Rio Id,Party/Alt Code,Address (optional),City (optional),State (Optional)\nExample Pharmacy,RIO12345,DIST-PARTY-101,Shop address,Mumbai,Maharashtra\n";
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a"); a.href = url; a.download = "pharmacy-master-template.csv"; a.click(); URL.revokeObjectURL(url);
   };
@@ -119,15 +119,12 @@ function MasterDataReviews() {
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Shop name" required><TextInput value={draft.name} onChange={(e)=>setDraft({...draft,name:e.target.value})}/></Field>
+          <Field label="Pharmacy Name" required><TextInput value={draft.name} onChange={(e)=>setDraft({...draft,name:e.target.value})}/></Field>
+          <Field label="RIO ID" required><TextInput value={draft.rioId} onChange={(e)=>setDraft({...draft,rioId:e.target.value})}/></Field>
+          <Field label="Party/Alt Code" required><TextInput value={draft.partyAltCode} onChange={(e)=>setDraft({...draft,partyAltCode:e.target.value})}/></Field>
           <Field label="Address"><TextInput value={draft.address} onChange={(e)=>setDraft({...draft,address:e.target.value})}/></Field>
-          <Field label="State" required><TextInput value={draft.state} onChange={(e)=>setDraft({...draft,state:e.target.value})}/></Field>
-          <Field label="City" required><TextInput value={draft.city} onChange={(e)=>setDraft({...draft,city:e.target.value})}/></Field>
-          <Field label="Area" required><TextInput value={draft.area} onChange={(e)=>setDraft({...draft,area:e.target.value})}/></Field>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="Latitude"><TextInput type="number" value={draft.latitude} onChange={(e)=>setDraft({...draft,latitude:e.target.value})}/></Field>
-            <Field label="Longitude"><TextInput type="number" value={draft.longitude} onChange={(e)=>setDraft({...draft,longitude:e.target.value})}/></Field>
-          </div>
+          <Field label="City (optional)"><TextInput value={draft.city} onChange={(e)=>setDraft({...draft,city:e.target.value})}/></Field>
+          <Field label="State (optional)"><TextInput value={draft.state} onChange={(e)=>setDraft({...draft,state:e.target.value})}/></Field>
         </div>
         <div className="mt-3 flex gap-2">
           <Button disabled={!!busy} onClick={saveShop}>{busy === "save" ? <Loader2 size={14} className="animate-spin"/> : <Plus size={14}/>} {editing ? "Save changes" : "Add verified shop"}</Button>
@@ -176,18 +173,18 @@ function MasterDataReviews() {
       <Card className="overflow-hidden">
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="text-sm font-semibold">Territory master list</h3>
-          <TextInput value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Search shop, city or area" className="mt-3"/>
+          <TextInput value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Search pharmacy, RIO ID, Party/Alt Code or city" className="mt-3"/>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">Shop</th><th className="px-3 py-2">Geography</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {shops.map((shop)=><tr key={shop.id}>
-                <td className="px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">{shop.address||"—"}</p></td>
-                <td className="px-3 py-2">{shop.area}, {shop.city}, {shop.state}</td>
+                <td className="px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_code||"—"}</p><p className="text-xs text-slate-500">{shop.address||"—"}</p></td>
+                <td className="px-3 py-2">{[shop.city,shop.state].filter(Boolean).join(", ")||"—"}</td>
                 <td className="px-3 py-2">{shop.active ? "Active" : "Inactive"}</td>
                 <td className="px-3 py-2"><div className="flex min-w-80 flex-wrap gap-2">
-                  <Button variant="ghost" size="sm" onClick={()=>{setEditing(shop.id);setDraft({name:shop.name,address:shop.address||"",state:shop.state,city:shop.city,area:shop.area,latitude:shop.latitude??"",longitude:shop.longitude??""})}}>Edit</Button>
+                  <Button variant="ghost" size="sm" onClick={()=>{setEditing(shop.id);setDraft({name:shop.name,rioId:shop.rio_id||"",partyAltCode:shop.party_alt_code||"",address:shop.address||"",state:shop.state||"",city:shop.city||""})}}>Edit</Button>
                   {shop.active?<Button variant="danger" size="sm" onClick={async()=>{setBusy(shop.id);try{await api.deactivateMasterPharmacy(shop.id);await load()}catch(e){setError(e.message)}finally{setBusy("")}}}>Deactivate</Button>:null}
                   <select className={inputCls} value={mergeTargets[shop.id]||""} onChange={(e)=>setMergeTargets({...mergeTargets,[shop.id]:e.target.value})}>
                     <option value="">Merge into…</option>{shops.filter((x)=>x.id!==shop.id&&x.active).map((x)=><option key={x.id} value={x.id}>{x.name} · {x.city}</option>)}

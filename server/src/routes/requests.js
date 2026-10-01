@@ -344,10 +344,10 @@ router.delete("/field-users/:id", requireRole(...LEADER_ROLES), async (req, res,
 });
 
 function assertManagerTerritory(user, data) {
-  if (user.assigned_state && data.state !== user.assigned_state) {
+  if (user.assigned_state && data.state && data.state !== user.assigned_state) {
     throw Object.assign(new Error("This state is outside your assigned territory."), { status: 403 });
   }
-  if (user.assigned_city && data.city !== user.assigned_city) {
+  if (user.assigned_city && data.city && data.city !== user.assigned_city) {
     throw Object.assign(new Error("This city is outside your assigned territory."), { status: 403 });
   }
 }
@@ -376,7 +376,7 @@ router.get("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, 
   try {
     const search = String(req.query.search || "").trim().toLowerCase();
     const params = [search];
-    let where = "WHERE ($1::text = '' OR lower(p.name) LIKE '%' || $1 || '%' OR lower(p.city) LIKE '%' || $1 || '%' OR lower(p.area) LIKE '%' || $1 || '%')";
+    let where = "WHERE ($1::text = '' OR lower(p.name) LIKE '%' || $1 || '%' OR lower(COALESCE(p.rio_id,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.party_alt_code,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.city,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.area,'')) LIKE '%' || $1 || '%')";
     if (req.user.assigned_state) { params.push(req.user.assigned_state); where += ` AND p.state = $${params.length}`; }
     if (req.user.assigned_city) { params.push(req.user.assigned_city); where += ` AND p.city = $${params.length}`; }
     const { rows } = await query(
@@ -390,29 +390,29 @@ router.get("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, 
 router.post("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const p = req.body || {};
-    if (!p.name || !p.state || !p.city || !p.area) {
-      return res.status(400).json({ error: "Name, state, city and area are required." });
+    if (!p.name || !p.rioId || !p.partyAltCode) {
+      return res.status(400).json({ error: "Pharmacy Name, RIO ID and Party/Alt Code are required." });
     }
     assertManagerTerritory(req.user, p);
     const pharmacy = await withTransaction(async (client) => {
       const nameKey = String(p.name).trim().toLowerCase().replace(/\s+/g, " ");
       const { rows } = await client.query(
-        `INSERT INTO pharmacies (name,name_key,address,state,city,area,latitude,longitude,created_by,active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE)
-         ON CONFLICT (city,name_key) DO UPDATE SET
-           name=EXCLUDED.name,address=EXCLUDED.address,state=EXCLUDED.state,area=EXCLUDED.area,
-           latitude=EXCLUDED.latitude,longitude=EXCLUDED.longitude,active=TRUE
+        `INSERT INTO pharmacies (name,name_key,rio_id,party_alt_code,address,state,city,area,latitude,longitude,created_by,active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,$9,$10,TRUE)
+         ON CONFLICT (rio_id) WHERE rio_id IS NOT NULL DO UPDATE SET
+           name=EXCLUDED.name,name_key=EXCLUDED.name_key,party_alt_code=EXCLUDED.party_alt_code,address=EXCLUDED.address,
+           state=EXCLUDED.state,city=EXCLUDED.city,latitude=EXCLUDED.latitude,longitude=EXCLUDED.longitude,active=TRUE
          RETURNING *`,
-        [String(p.name).trim(), nameKey, p.address || null, p.state, p.city, p.area,
-         p.latitude ?? null, p.longitude ?? null, req.user.id]
+        [String(p.name).trim(), nameKey, String(p.rioId).trim().toUpperCase(), String(p.partyAltCode).trim(),
+         p.address || null, p.state || null, p.city || null, p.latitude ?? null, p.longitude ?? null, req.user.id]
       );
-      await ensureGeography(client, p.state, p.city, p.area);
       return rows[0];
     });
     await audit(req.user.id, "master_pharmacy.saved", "pharmacy", pharmacy.id, null);
     res.status(201).json({ pharmacy });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
+    if (err.code === "23505") return res.status(409).json({ error: "That RIO ID is already assigned to another pharmacy." });
     next(err);
   }
 });
@@ -423,24 +423,25 @@ router.patch("/master-pharmacies/:id", requireRole(...LEADER_ROLES), async (req,
     if (!existing.rows[0]) return res.status(404).json({ error: "Shop not found." });
     assertManagerTerritory(req.user, existing.rows[0]);
     const p = { ...existing.rows[0], ...(req.body || {}) };
-    if (!p.name || !p.state || !p.city || !p.area) return res.status(400).json({ error: "Name, state, city and area are required." });
+    const rioId = p.rioId ?? p.rio_id;
+    const partyAltCode = p.partyAltCode ?? p.party_alt_code;
+    if (!p.name || !rioId || !partyAltCode) return res.status(400).json({ error: "Pharmacy Name, RIO ID and Party/Alt Code are required." });
     assertManagerTerritory(req.user, p);
     const pharmacy = await withTransaction(async (client) => {
       const nameKey = String(p.name).trim().toLowerCase().replace(/\s+/g, " ");
       const { rows } = await client.query(
-        `UPDATE pharmacies SET name=$1,name_key=$2,address=$3,state=$4,city=$5,area=$6,
-           latitude=$7,longitude=$8,active=$9 WHERE id=$10 RETURNING *`,
-        [String(p.name).trim(), nameKey, p.address || null, p.state, p.city, p.area,
-         p.latitude ?? null, p.longitude ?? null, p.active !== false, req.params.id]
+        `UPDATE pharmacies SET name=$1,name_key=$2,rio_id=$3,party_alt_code=$4,address=$5,state=$6,city=$7,area=NULL,
+           latitude=$8,longitude=$9,active=$10 WHERE id=$11 RETURNING *`,
+        [String(p.name).trim(), nameKey, String(rioId).trim().toUpperCase(), String(partyAltCode).trim(), p.address || null,
+         p.state || null, p.city || null, p.latitude ?? null, p.longitude ?? null, p.active !== false, req.params.id]
       );
-      await ensureGeography(client, p.state, p.city, p.area);
       return rows[0];
     });
     await audit(req.user.id, "master_pharmacy.updated", "pharmacy", pharmacy.id, null);
     res.json({ pharmacy });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
-    if (err.code === "23505") return res.status(409).json({ error: "A shop with that name already exists in this city. Merge the duplicate instead." });
+    if (err.code === "23505") return res.status(409).json({ error: "That RIO ID is already assigned to another pharmacy." });
     next(err);
   }
 });
@@ -487,26 +488,32 @@ router.post("/master-pharmacies/import", requireRole(...LEADER_ROLES), masterUpl
     if (rows.length < 2) return res.status(400).json({ error: "The file has no data rows." });
     const header = rows[0].map((h) => String(h).trim().toLowerCase());
     const idx = (name) => header.indexOf(name);
-    const missing = ["name","state","city","area"].filter((h) => idx(h) < 0);
+    const idxAny = (...names) => names.map(idx).find((position) => position >= 0) ?? -1;
+    const requiredHeaders = ["pharmacy name", "rio id", "party/alt code"];
+    const missing = requiredHeaders.filter((h) => idx(h) < 0);
     if (missing.length) return res.status(400).json({ error: `Missing column(s): ${missing.join(", ")}.` });
-    const items = rows.slice(1).map((r) => ({
-      name: String(r[idx("name")] || "").trim(), address: idx("address") >= 0 ? String(r[idx("address")] || "").trim() : "",
-      state: String(r[idx("state")] || "").trim(), city: String(r[idx("city")] || "").trim(), area: String(r[idx("area")] || "").trim(),
-      latitude: idx("latitude") >= 0 && r[idx("latitude")] !== "" ? Number(r[idx("latitude")]) : null,
-      longitude: idx("longitude") >= 0 && r[idx("longitude")] !== "" ? Number(r[idx("longitude")]) : null,
-    })).filter((p) => p.name && p.state && p.city && p.area);
+    const items = rows.slice(1).map((r, index) => ({
+      rowNumber: index + 2,
+      name: String(r[idx("pharmacy name")] || "").trim(),
+      rioId: String(r[idx("rio id")] || "").trim().toUpperCase(),
+      partyAltCode: String(r[idx("party/alt code")] || "").trim(),
+      address: idxAny("address", "address (optional)") >= 0 ? String(r[idxAny("address", "address (optional)")] || "").trim() : "",
+      state: idxAny("state", "state (optional)") >= 0 ? String(r[idxAny("state", "state (optional)")] || "").trim() : "",
+      city: idxAny("city", "city (optional)") >= 0 ? String(r[idxAny("city", "city (optional)")] || "").trim() : "",
+    }));
+    const invalid = items.find((p) => !p.name || !p.rioId || !p.partyAltCode);
+    if (invalid) return res.status(400).json({ error: `Row ${invalid.rowNumber}: Pharmacy Name, RIO ID and Party/Alt Code are required.` });
     items.forEach((p) => assertManagerTerritory(req.user, p));
     const imported = await withTransaction(async (client) => {
       for (const p of items) {
         const nameKey = p.name.toLowerCase().replace(/\s+/g, " ");
         await client.query(
-          `INSERT INTO pharmacies (name,name_key,address,state,city,area,latitude,longitude,created_by,active)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE)
-           ON CONFLICT (city,name_key) DO UPDATE SET name=EXCLUDED.name,address=EXCLUDED.address,
-             state=EXCLUDED.state,area=EXCLUDED.area,latitude=EXCLUDED.latitude,longitude=EXCLUDED.longitude,active=TRUE`,
-          [p.name,nameKey,p.address||null,p.state,p.city,p.area,p.latitude,p.longitude,req.user.id]
+          `INSERT INTO pharmacies (name,name_key,rio_id,party_alt_code,address,state,city,area,created_by,active)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,TRUE)
+           ON CONFLICT (rio_id) WHERE rio_id IS NOT NULL DO UPDATE SET name=EXCLUDED.name,name_key=EXCLUDED.name_key,
+             party_alt_code=EXCLUDED.party_alt_code,address=EXCLUDED.address,state=EXCLUDED.state,city=EXCLUDED.city,active=TRUE`,
+          [p.name,nameKey,p.rioId,p.partyAltCode,p.address||null,p.state||null,p.city||null,req.user.id]
         );
-        await ensureGeography(client, p.state, p.city, p.area);
       }
       return items.length;
     });
