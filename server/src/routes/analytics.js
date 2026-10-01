@@ -112,6 +112,7 @@ async function summary(q, opts = {}) {
   const sales = await query(
     `SELECT u.id, u.name, u.employee_id, u.assigned_city AS city,
             COUNT(DISTINCT a.shop_key)::int AS shops,
+            COUNT(DISTINCT a.id)::int AS activations,
             COALESCE(SUM(aa.quantity), 0)::int AS installed
      FROM users u
      LEFT JOIN activations a ON a.user_id = u.id AND a.id IN (
@@ -132,7 +133,7 @@ async function summary(q, opts = {}) {
   sales.rows.forEach((r) => { headcount[r.city] = (headcount[r.city] || 0) + 1; });
   const bySales = sales.rows.map((r) => {
     const target = Math.round((cityPlanMap[r.city] || 0) / (headcount[r.city] || 1));
-    return { id: r.id, name: r.name, employeeId: r.employee_id, city: r.city, shops: r.shops, installed: r.installed, target, completion: pct(r.shops, target) };
+    return { id: r.id, name: r.name, employeeId: r.employee_id, city: r.city, shops: r.shops, activations: r.activations, installed: r.installed, target, completion: pct(r.shops, target) };
   });
 
   // Every leadership row rolls up all salespeople below that person. A logged-in
@@ -172,12 +173,13 @@ async function summary(q, opts = {}) {
     const salespeople = fieldIdsBelow(person).map((id) => salesById.get(id)).filter(Boolean);
     const shops = salespeople.reduce((sum, item) => sum + item.shops, 0);
     const installed = salespeople.reduce((sum, item) => sum + item.installed, 0);
+    const activations = salespeople.reduce((sum, item) => sum + item.activations, 0);
     const target = salespeople.reduce((sum, item) => sum + item.target, 0);
     return {
       id: person.id, name: person.name, employeeId: person.employee_id,
       role: person.role, roleLabel: ROLE_LABELS[person.role], region: person.region,
       state: person.state, city: person.city, reportingManager: person.reporting_manager_name,
-      teamSize: salespeople.length, shops, installed, target, completion: pct(shops, target),
+      teamSize: salespeople.length, shops, activations, installed, target, completion: pct(shops, target),
     };
   }).sort((a, b) => (roleOrder[a.role] - roleOrder[b.role]) || b.shops - a.shops || a.name.localeCompare(b.name));
 
@@ -217,52 +219,25 @@ async function summary(q, opts = {}) {
 // Manager dashboard: only salespeople assigned to the logged-in manager.
 router.get("/manager/team", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
-    const { rows } = await query(
-      `SELECT
-         u.id,
-         u.name,
-         u.employee_id,
-         u.assigned_state AS state,
-         u.assigned_city AS city,
-         u.active,
-         COUNT(DISTINCT a.shop_key)::int AS shops_activated,
-         COUNT(DISTINCT a.id)::int AS activations
-       FROM users u
-       LEFT JOIN activations a
-         ON a.user_id = u.id
-         AND a.status <> 'Rejected'
-       WHERE u.role = 'field'
-         AND ${descendantSql("$1", "u")}
-       GROUP BY
-         u.id,
-         u.name,
-         u.employee_id,
-         u.assigned_state,
-         u.assigned_city,
-         u.active
-       ORDER BY u.active DESC, shops_activated DESC, u.name ASC`,
-      [req.user.id]
-    );
-
-    const totalSalesmen = rows.filter((r) => r.active).length;
-
-    const totalStoresActivated = rows.reduce(
-      (sum, r) => sum + r.shops_activated,
-      0
-    );
-
-    const totalActivations = rows.reduce(
-      (sum, r) => sum + r.activations,
-      0
-    );
+    const data = await summary({}, { ancestorId: req.user.id });
+    const members = data.byPeople.filter((person) => person.id !== req.user.id);
+    const salesmen = members.filter((person) => person.role === "field");
+    const totalStoresActivated = salesmen.reduce((sum, person) => sum + person.shops, 0);
+    const totalActivations = salesmen.reduce((sum, person) => sum + person.activations, 0);
 
     res.json({
       totals: {
-        salesmen: totalSalesmen,
+        members: members.length,
+        salesmen: salesmen.length,
         storesActivated: totalStoresActivated,
         activations: totalActivations
       },
-      salesmen: rows
+      members,
+      salesmen: salesmen.map((person) => ({
+        id: person.id, name: person.name, employee_id: person.employeeId,
+        state: person.state, city: person.city, active: true,
+        shops_activated: person.shops, activations: person.activations,
+      }))
     });
   } catch (err) {
     next(err);

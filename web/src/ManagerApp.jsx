@@ -422,7 +422,7 @@ function ManagerPerformance({ user, geo }) {
 
 export default function ManagerApp({ user, geo, onLogout }) {
   const [tab,setTab]=useState("overview"), [refresh,setRefresh]=useState(0), [msg,setMsg]=useState(null), [busy,setBusy]=useState(false);
-  const [teamData, setTeamData] = useState({ totals: { salesmen: 0, storesActivated: 0, activations: 0 }, salesmen: [] });
+  const [teamData, setTeamData] = useState({ totals: { members: 0, salesmen: 0, storesActivated: 0, activations: 0 }, members: [], salesmen: [] });
   const [selectedSalesman, setSelectedSalesman] = useState(null);
   const [salesmanDetails, setSalesmanDetails] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -608,8 +608,9 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 <main className="mx-auto max-w-3xl space-y-4 px-4 py-5">{showPassword?<ChangePassword onClose={()=>setShowPassword(false)}/>:<>{msg?<Banner kind={msg.kind}>{msg.text}</Banner>:null}{tab==='overview'?<div className="space-y-4">
 <div className="grid gap-3 md:grid-cols-3">
 <Card className="p-4">
-<p className="text-sm text-slate-500">My salesmen</p>
-<p className="mt-1 text-2xl font-semibold">{teamData.totals.salesmen}</p>
+<p className="text-sm text-slate-500">My team</p>
+<p className="mt-1 text-2xl font-semibold">{teamData.totals.members ?? teamData.totals.salesmen}</p>
+<p className="text-xs text-slate-500">{teamData.totals.salesmen} salesmen</p>
 </Card>
 <Card className="p-4">
 <p className="text-sm text-slate-500">Stores activated</p>
@@ -622,30 +623,34 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 </div>
 <Card className="overflow-hidden">
 <div className="border-b border-slate-200 px-4 py-3">
-<h2 className="font-semibold">Salesmen performance</h2>
+<h2 className="font-semibold">Team hierarchy and performance</h2>
 </div>
 <div className="overflow-x-auto">
 <table className="w-full text-sm">
 <thead className="bg-slate-50 text-slate-500">
 <tr>
-<th className="px-4 py-3 text-left">Salesman</th>
+<th className="px-4 py-3 text-left">Person</th>
 <th className="px-4 py-3 text-left">Employee ID</th>
-<th className="px-4 py-3 text-left">Region</th>
+<th className="px-4 py-3 text-left">Role</th>
+<th className="px-4 py-3 text-left">Reports to</th>
+<th className="px-4 py-3 text-left">Territory</th>
 <th className="px-4 py-3 text-right">Stores activated</th>
 <th className="px-4 py-3 text-right">Activations</th>
 </tr>
 </thead>
-<tbody className="divide-y divide-slate-100">{teamData.salesmen.map(s=>
+<tbody className="divide-y divide-slate-100">{(teamData.members||teamData.salesmen).map(s=>
 <tr key={s.id}>
 <td className="px-4 py-3 font-medium">
-<button type="button" className="text-teal-700 hover:underline" onClick={()=>openSalesman(s)}>{s.name}</button>
+{s.role==='field'?<button type="button" className="text-teal-700 hover:underline" onClick={()=>openSalesman({...s,employee_id:s.employeeId,state:s.state,city:s.city})}>{s.name}</button>:s.name}
 </td>
-<td className="px-4 py-3">{s.employee_id}</td>
-<td className="px-4 py-3">{[s.city,s.state].filter(Boolean).join(', ')||'—'}</td>
-<td className="px-4 py-3 text-right font-medium">{s.shops_activated}</td>
+<td className="px-4 py-3">{s.employeeId||s.employee_id}</td>
+<td className="px-4 py-3">{s.roleLabel||'Salesman'}</td>
+<td className="px-4 py-3">{s.reportingManager||'—'}</td>
+<td className="px-4 py-3">{[s.city,s.state,s.region].filter(Boolean).join(', ')||'—'}</td>
+<td className="px-4 py-3 text-right font-medium">{s.shops??s.shops_activated}</td>
 <td className="px-4 py-3 text-right">{s.activations}</td>
-</tr>)}{!teamData.salesmen.length?<tr>
-<td colSpan="5" className="px-4 py-8 text-center text-slate-400">No salesmen assigned to you yet.</td>
+</tr>)}{!(teamData.members||teamData.salesmen).length?<tr>
+<td colSpan="7" className="px-4 py-8 text-center text-slate-400">No City Heads, Team Leads or Salesmen are assigned below you yet.</td>
 </tr>:null}</tbody>
 </table>
 </div>
