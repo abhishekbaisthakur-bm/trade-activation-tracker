@@ -43,7 +43,7 @@ function RequestHistory({ refresh }) {
 </div>
 }
 
-function MasterDataReviews() {
+function MasterDataReviews({ canManage }) {
   const [items, setItems] = useState([]);
   const [shops, setShops] = useState([]);
   const [search, setSearch] = useState("");
@@ -55,7 +55,7 @@ function MasterDataReviews() {
 
   const load = async () => {
     try {
-      const [reviews, master] = await Promise.all([api.masterDataReviews(), api.masterPharmacies(search)]);
+      const [reviews, master] = await Promise.all([canManage ? api.masterDataReviews() : Promise.resolve({ reviews: [] }), api.masterPharmacies(search)]);
       setItems(reviews.reviews); setShops(master.pharmacies); setError("");
     } catch (e) { setError(e.message); }
   };
@@ -104,7 +104,7 @@ function MasterDataReviews() {
   return (
     <div className="space-y-3">
       {error ? <Banner kind="error">{error}</Banner> : null}
-      <Card className="p-4">
+      {canManage ? <Card className="p-4">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold">{editing ? "Edit master shop" : "Add to master list"}</h3>
@@ -130,8 +130,8 @@ function MasterDataReviews() {
           <Button disabled={!!busy} onClick={saveShop}>{busy === "save" ? <Loader2 size={14} className="animate-spin"/> : <Plus size={14}/>} {editing ? "Save changes" : "Add verified shop"}</Button>
           {editing ? <Button variant="ghost" onClick={resetDraft}>Cancel</Button> : null}
         </div>
-      </Card>
-      <Card className="overflow-hidden">
+      </Card> : null}
+      {canManage ? <Card className="overflow-hidden">
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="text-sm font-semibold">Shop and geography verification</h3>
           <p className="text-xs text-slate-500">
@@ -169,7 +169,7 @@ function MasterDataReviews() {
           })}
           {!items.length ? <div className="p-10 text-center text-sm text-slate-400">No master-data reviews.</div> : null}
         </div>
-      </Card>
+      </Card> : null}
       <Card className="overflow-hidden">
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="text-sm font-semibold">Territory master list</h3>
@@ -177,22 +177,21 @@ function MasterDataReviews() {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">Shop</th><th className="px-3 py-2">Geography</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr></thead>
+            <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">Shop</th><th className="px-3 py-2">Geography</th><th className="px-3 py-2">Status</th>{canManage?<th className="px-3 py-2">Actions</th>:null}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {shops.map((shop)=><tr key={shop.id}>
                 <td className="px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_code||"—"}</p><p className="text-xs text-slate-500">{shop.address||"—"}</p></td>
                 <td className="px-3 py-2">{[shop.city,shop.state].filter(Boolean).join(", ")||"—"}</td>
                 <td className="px-3 py-2">{shop.active ? "Active" : "Inactive"}</td>
-                <td className="px-3 py-2"><div className="flex min-w-80 flex-wrap gap-2">
+                {canManage?<td className="px-3 py-2"><div className="flex min-w-80 flex-wrap gap-2">
                   <Button variant="ghost" size="sm" onClick={()=>{setEditing(shop.id);setDraft({name:shop.name,rioId:shop.rio_id||"",partyAltCode:shop.party_alt_code||"",address:shop.address||"",state:shop.state||"",city:shop.city||""})}}>Edit</Button>
                   {shop.active?<Button variant="danger" size="sm" onClick={async()=>{setBusy(shop.id);try{await api.deactivateMasterPharmacy(shop.id);await load()}catch(e){setError(e.message)}finally{setBusy("")}}}>Deactivate</Button>:null}
                   <select className={inputCls} value={mergeTargets[shop.id]||""} onChange={(e)=>setMergeTargets({...mergeTargets,[shop.id]:e.target.value})}>
-                    <option value="">Merge into…</option>{shops.filter((x)=>x.id!==shop.id&&x.active).map((x)=><option key={x.id} value={x.id}>{x.name} · {x.city}</option>)}
                   </select>
                   <Button variant="ghost" size="sm" disabled={!mergeTargets[shop.id]} onClick={async()=>{setBusy(`merge:${shop.id}`);try{await api.mergeMasterPharmacy(shop.id,mergeTargets[shop.id]);await load()}catch(e){setError(e.message)}finally{setBusy("")}}}>Merge</Button>
-                </div></td>
+                </div></td>:null}
               </tr>)}
-              {!shops.length?<tr><td colSpan="4" className="px-4 py-8 text-center text-slate-400">No master shops found.</td></tr>:null}
+              {!shops.length?<tr><td colSpan={canManage?4:3} className="px-4 py-8 text-center text-slate-400">No master shops found for your location.</td></tr>:null}
             </tbody>
           </table>
         </div>
@@ -546,7 +545,7 @@ const deactivateFieldUser = async () => {
   }
 };
 
-const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3],['master','Master data',CheckCircle2],['field','Users',Users],['target','Targets',Target],['requests','Requests',Clock]];
+const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3],['master','Master data',CheckCircle2],['field','Users',Users],...(user.role==='regional_head'?[['target','Targets',Target]]:[]),['requests','Requests',Clock]];
   return <div className="min-h-screen bg-slate-50">
 <header className="border-b border-slate-200 bg-white">
 <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
@@ -662,7 +661,7 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 <img src={photoUrl} alt={`${x.assetType} proof`} className="h-40 w-full rounded-lg border border-slate-200 object-cover"/>
 <p className="mt-1 text-xs text-teal-700">Click photo to view full size</p>
 </a>:x.hasPhoto?<p className="mt-2 text-xs text-slate-500">Loading photo...</p>:<p className="mt-2 text-xs text-slate-400">No proof photo</p>}</div>})}</div>:<p className="mt-1 text-sm text-slate-500">None</p>}</div>
-</div>)}</div>:<div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">No activations yet for this salesperson.</div>:<div className="py-8 text-center text-sm text-slate-500">Loading activation details...</div>}</Card>:null}</div>:null}{tab==='performance'?<ManagerPerformance user={user} geo={geo}/>:null}{tab==='master'?<MasterDataReviews/>:null}{tab==='requests'?<RequestHistory refresh={refresh}/>:null}{tab==='target'?<Card className="p-5">
+</div>)}</div>:<div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">No activations yet for this salesperson.</div>:<div className="py-8 text-center text-sm text-slate-500">Loading activation details...</div>}</Card>:null}</div>:null}{tab==='performance'?<ManagerPerformance user={user} geo={geo}/>:null}{tab==='master'?<MasterDataReviews canManage={user.role==='regional_head'}/>:null}{tab==='requests'?<RequestHistory refresh={refresh}/>:null}{tab==='target'&&user.role==='regional_head'?<Card className="p-5">
 <h2 className="mb-1 text-lg font-semibold">Suggest a target change</h2>
 <p className="mb-4 text-sm text-slate-500">Your suggestion remains pending until an Admin approves it. Approved changes are added to history and never silently overwrite old data.</p>
 <div className="grid gap-3 md:grid-cols-3">

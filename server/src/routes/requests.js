@@ -387,7 +387,7 @@ router.get("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, 
   } catch (err) { next(err); }
 });
 
-router.post("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, next) => {
+router.post("/master-pharmacies", requireRole("admin", "regional_head"), async (req, res, next) => {
   try {
     const p = req.body || {};
     if (!p.name || !p.rioId || !p.partyAltCode) {
@@ -417,7 +417,7 @@ router.post("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res,
   }
 });
 
-router.patch("/master-pharmacies/:id", requireRole(...LEADER_ROLES), async (req, res, next) => {
+router.patch("/master-pharmacies/:id", requireRole("admin", "regional_head"), async (req, res, next) => {
   try {
     const existing = await query("SELECT * FROM pharmacies WHERE id=$1", [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: "Shop not found." });
@@ -446,7 +446,7 @@ router.patch("/master-pharmacies/:id", requireRole(...LEADER_ROLES), async (req,
   }
 });
 
-router.delete("/master-pharmacies/:id", requireRole(...LEADER_ROLES), async (req, res, next) => {
+router.delete("/master-pharmacies/:id", requireRole("admin", "regional_head"), async (req, res, next) => {
   try {
     const existing = await query("SELECT * FROM pharmacies WHERE id=$1", [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: "Shop not found." });
@@ -460,7 +460,7 @@ router.delete("/master-pharmacies/:id", requireRole(...LEADER_ROLES), async (req
   }
 });
 
-router.post("/master-pharmacies/:id/merge", requireRole(...LEADER_ROLES), async (req, res, next) => {
+router.post("/master-pharmacies/:id/merge", requireRole("admin", "regional_head"), async (req, res, next) => {
   try {
     const targetId = String(req.body.targetId || "");
     if (!targetId || targetId === req.params.id) return res.status(400).json({ error: "Choose a different target shop." });
@@ -481,7 +481,7 @@ router.post("/master-pharmacies/:id/merge", requireRole(...LEADER_ROLES), async 
   }
 });
 
-router.post("/master-pharmacies/import", requireRole(...LEADER_ROLES), masterUpload.single("file"), async (req, res, next) => {
+router.post("/master-pharmacies/import", requireRole("admin", "regional_head"), masterUpload.single("file"), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Attach a CSV file." });
     const rows = parseCsv(req.file.buffer.toString("utf8").replace(/^\uFEFF/, ""));
@@ -526,7 +526,7 @@ router.post("/master-pharmacies/import", requireRole(...LEADER_ROLES), masterUpl
 });
 
 // Manager: review new shop/geography values submitted by their own field team.
-router.get("/master-data", requireRole(...LEADER_ROLES), async (req, res, next) => {
+router.get("/master-data", requireRole("regional_head"), async (req, res, next) => {
   try {
     const params = [req.user.id];
     let statusClause = "";
@@ -540,7 +540,7 @@ router.get("/master-data", requireRole(...LEADER_ROLES), async (req, res, next) 
        FROM master_data_reviews m
        JOIN activations a ON a.id = m.activation_id
        JOIN users u ON u.id = m.submitted_by
-       WHERE m.manager_id = $1${statusClause}
+       WHERE ${descendantOrSelfSql("$1", "u")}${statusClause}
        ORDER BY CASE m.status WHEN 'pending' THEN 0 ELSE 1 END, m.created_at DESC`,
       params
     );
@@ -550,12 +550,13 @@ router.get("/master-data", requireRole(...LEADER_ROLES), async (req, res, next) 
   }
 });
 
-router.post("/master-data/:id/approve", requireRole(...LEADER_ROLES), async (req, res, next) => {
+router.post("/master-data/:id/approve", requireRole("regional_head"), async (req, res, next) => {
   try {
     const review = await withTransaction(async (client) => {
       const found = await client.query(
-        `SELECT * FROM master_data_reviews
-         WHERE id = $1 AND manager_id = $2 FOR UPDATE`,
+        `SELECT m.* FROM master_data_reviews m
+         JOIN users u ON u.id = m.submitted_by
+         WHERE m.id = $1 AND ${descendantOrSelfSql("$2", "u")} FOR UPDATE OF m`,
         [req.params.id, req.user.id]
       );
       const row = found.rows[0];
@@ -617,12 +618,14 @@ router.post("/master-data/:id/approve", requireRole(...LEADER_ROLES), async (req
   }
 });
 
-router.post("/master-data/:id/reject", requireRole(...LEADER_ROLES), async (req, res, next) => {
+router.post("/master-data/:id/reject", requireRole("regional_head"), async (req, res, next) => {
   try {
     const { rows } = await query(
-      `UPDATE master_data_reviews
+      `UPDATE master_data_reviews m
        SET status='rejected', reviewed_by=$1, reviewed_at=now(), review_note=$2
-       WHERE id=$3 AND manager_id=$1 AND status='pending'
+       WHERE m.id=$3 AND m.status='pending' AND EXISTS (
+         SELECT 1 FROM users u WHERE u.id=m.submitted_by AND ${descendantOrSelfSql("$1", "u")}
+       )
        RETURNING *`,
       [req.user.id, String(req.body.note || "").trim() || null, req.params.id]
     );
@@ -664,6 +667,9 @@ router.post("/", requireRole(...LEADER_ROLES), async (req, res, next) => {
     }
 
     validateRequest(b.type, b.payload);
+    if (b.type === "target_change" && req.user.role !== "regional_head") {
+      return res.status(403).json({ error: "Only a Regional Head can submit target changes." });
+    }
     if (b.type === "target_change") assertManagerTerritory(req.user, b.payload);
 
     const { rows } = await query(
