@@ -45,6 +45,7 @@ app.get("/api/meta", (req, res) => res.json({ assets: ASSETS }));
 
 app.use("/api/auth", require("./routes/auth").router);
 app.use("/api/admin", require("./routes/admin"));
+app.use("/api/bulk-users", require("./routes/bulk-users"));
 app.use("/api/requests", require("./routes/requests"));
 app.use("/api/activations", require("./routes/activations").router);
 app.use("/api/analytics", require("./routes/analytics"));

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Store, LogOut, Send, Users, Target, Clock, Loader2, Plus, KeyRound, CheckCircle2, XCircle, Download, Upload, BarChart3 } from "lucide-react";
 import { api } from "./api";
+import BulkUsers from "./BulkUsers";
 import { APP_NAME, BRAND_LINE, ASSETS, inputCls, Field, TextInput, Select, ComboInput, Button, Card, Banner, PenTable, PenCell, statusTone } from "./ui";
 
 const emptyAssets = Object.fromEntries(ASSETS.map(a => [a.key, 0]));
@@ -738,6 +739,12 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 </Card>:null}{tab==='field'?<Card className="p-5">
 <h2 className="mb-1 text-lg font-semibold">Add team member</h2>
 <p className="mb-4 text-sm text-slate-500">Create an account below you and select its reporting manager.</p>
+<BulkUsers inline role={user.role} onImported={async () => {
+  const [fields, team] = await Promise.all([api.managedUsers(), api.managerTeam()]);
+  setFieldUsers(fields.users);
+  setTeamData(team);
+  setRefresh(value => value + 1);
+}} />
 <div className="grid gap-3 md:grid-cols-2">
 <Field label="Role" required>
 <select className={inputCls} value={field.role} onChange={e=>setField({...field,role:e.target.value,managerId:user.id})}>

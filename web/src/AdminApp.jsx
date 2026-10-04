@@ -5,6 +5,7 @@ import {
   ChevronDown, ChevronUp, Clock,
 } from "lucide-react";
 import { api } from "./api";
+import BulkUsers from "./BulkUsers";
 import {
   APP_NAME, BRAND_LINE, ASSETS, assetLabel, inputCls, Field, TextInput, Select, ComboInput, Button, Card,
   Banner, Modal, MiniMap, PenTable, PenCell, AdminOverview, AdminAnalytics, fmtDate, fmtTime,
@@ -386,6 +387,8 @@ function AdminData({ geo, users, filters, onUsersChanged, masterAdmin }) {
       </Card>
 
       {err ? <Banner kind="error">{err}</Banner> : null}
+
+      <BulkUsers role="admin" onImported={onUsersChanged} />
 
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">

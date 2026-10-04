@@ -30,7 +30,7 @@ async function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, config.jwtSecret);
     const { rows } = await query(
-      "SELECT id, name, employee_id, mobile, email, role, region, assigned_state, assigned_city, manager_id, active FROM users WHERE id = $1",
+      "SELECT id, name, employee_id, mobile, email, role, region, assigned_state, assigned_city, assigned_area, manager_id, active FROM users WHERE id = $1",
       [payload.sub]
     );
     if (!rows.length || !rows[0].active) {

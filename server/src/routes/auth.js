@@ -23,6 +23,7 @@ const publicUser = (u) => ({
   region: u.region,
   state: u.assigned_state,
   city: u.assigned_city,
+  area: u.assigned_area || null,
   managerId: u.manager_id,
   reportingManagerName: u.reporting_manager_name || null,
   active: u.active,

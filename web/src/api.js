@@ -91,6 +91,11 @@ export const api = {
     request("/auth/change-password", { method: "POST", body: { currentPassword, newPassword } }),
 
   users: () => request("/admin/users"),
+  importUsers: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request("/bulk-users/import", { method: "POST", form });
+  },
   createUser: (user) => request("/admin/users", { method: "POST", body: user }),
   updateUser: (id, patch) => request(`/admin/users/${id}`, { method: "PATCH", body: patch }),
   deactivateUser: (id) => request(`/admin/users/${id}`, { method: "DELETE" }),

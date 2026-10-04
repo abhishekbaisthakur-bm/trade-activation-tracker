@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   region         TEXT,
   assigned_state TEXT,
   assigned_city  TEXT,
+  assigned_area  TEXT,
   manager_id     UUID REFERENCES users(id) ON DELETE SET NULL,
   password_hash  TEXT NOT NULL,
   active         BOOLEAN NOT NULL DEFAULT TRUE,
@@ -136,6 +137,7 @@ ALTER TABLE users
 ADD COLUMN IF NOT EXISTS manager_id UUID REFERENCES users(id) ON DELETE SET NULL;
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS region TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_area TEXT;
 
 ALTER TABLE pharmacies ALTER COLUMN area DROP NOT NULL;
 ALTER TABLE activations ALTER COLUMN area DROP NOT NULL;
