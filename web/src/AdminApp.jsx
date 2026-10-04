@@ -342,6 +342,61 @@ function AdminData({ geo, users, filters, onUsersChanged, masterAdmin }) {
   const [draft, setDraft] = useState(emptyUser);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [userView, setUserView] = useState("all");
+  const [expandedUsers, setExpandedUsers] = useState(() => new Set());
+
+  const usersByManager = useMemo(() => {
+    const grouped = new Map();
+    users.forEach((user) => {
+      const key = user.managerId || "unassigned";
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(user);
+    });
+    grouped.forEach((items) => items.sort((a, b) => a.name.localeCompare(b.name)));
+    return grouped;
+  }, [users]);
+
+  const toggleUser = (id) => setExpandedUsers((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const territory = (user) => user.role === "admin" ? "PAN India"
+    : user.role === "regional_head" ? (user.region || "Region required")
+      : [user.city, user.state, user.region].filter(Boolean).join(", ") || "Territory required";
+
+  const editUser = (user) => { setDraft({ ...user, password: "" }); setEditing(user.id); setErr(""); };
+
+  const HierarchyRow = ({ user, depth = 0 }) => {
+    const children = user.role === "admin" ? [] : (usersByManager.get(user.id) || []).filter((child) => child.role !== "admin");
+    const open = expandedUsers.has(user.id);
+    return <>
+      <div className="flex items-center gap-3 border-t border-slate-100 px-3 py-3 first:border-t-0 hover:bg-slate-50">
+        <div style={{ paddingLeft: `${Math.min(depth, 3) * 24}px` }} className="flex min-w-0 flex-1 items-center gap-2">
+          {children.length ? <button type="button" onClick={() => toggleUser(user.id)}
+            aria-label={`${open ? "Collapse" : "Expand"} ${user.name}`}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:text-teal-700">
+            {open ? <ChevronUp size={15}/> : <ChevronDown size={15}/>} </button>
+          : <span className="h-7 w-7 shrink-0" />}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-slate-900">{user.name}</span>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{roleLabel(user.role)}</span>
+              <span className={`rounded-full border px-2 py-0.5 text-xs ${user.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>{user.active ? "Active" : "Inactive"}</span>
+            </div>
+            <p className="mt-0.5 truncate text-xs text-slate-500">{user.employeeId} · {territory(user)}{user.reportingManagerName ? ` · Reports to ${user.reportingManagerName}` : ""}</p>
+          </div>
+        </div>
+        {children.length ? <span className="hidden text-xs text-slate-400 sm:inline">{children.length} direct</span> : null}
+        <div className="shrink-0 whitespace-nowrap">
+          {(user.role !== "admin" || masterAdmin) ? <button onClick={() => editUser(user)} className="mr-3 text-xs font-medium text-teal-700 hover:underline">Edit</button> : null}
+          {user.active && (user.role !== "admin" || masterAdmin) && user.employeeId !== "ADMIN001" ? <button onClick={() => deactivate(user.id)} className="text-xs font-medium text-rose-600 hover:underline">Deactivate</button> : null}
+        </div>
+      </div>
+      {open ? children.map((child) => <HierarchyRow key={child.id} user={child} depth={depth + 1}/>) : null}
+    </>;
+  };
 
   const save = async () => {
     setBusy(true);
@@ -391,55 +446,38 @@ function AdminData({ geo, users, filters, onUsersChanged, masterAdmin }) {
       <BulkUsers role="admin" onImported={onUsersChanged} />
 
       <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div><h3 className="text-sm font-semibold text-slate-900">Users and reporting hierarchy</h3>
             <p className="text-xs text-slate-500">Only ADMIN001 can create or manage Admin accounts.</p></div>
           <Button size="sm" onClick={() => { setDraft(emptyUser); setEditing("new"); setErr(""); }}>
             <Plus size={15} /> Add user
           </Button>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs text-slate-500">
-              <tr>
-                <th className="px-4 py-2 font-medium">Name</th>
-                <th className="px-4 py-2 font-medium">Employee ID</th>
-                <th className="px-4 py-2 font-medium">Mobile</th>
-                <th className="px-4 py-2 font-medium">Role</th>
-                <th className="px-4 py-2 font-medium">Reports to</th>
-                <th className="px-4 py-2 font-medium">Territory</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td className="px-4 py-2.5 font-medium text-slate-900">{u.name}</td>
-                  <td className="px-4 py-2.5">{u.employeeId}</td>
-                  <td className="px-4 py-2.5">{u.mobile || "-"}</td>
-                  <td className="px-4 py-2.5">{roleLabel(u.role)}</td>
-                  <td className="px-4 py-2.5">{u.reportingManagerName || "—"}</td>
-                  <td className="px-4 py-2.5">{
-                    u.role === "admin" ? "PAN India" : u.role === "regional_head" ? (u.region || "Region required") : [u.city, u.state, u.region].filter(Boolean).join(", ") || "Territory required"
-                  }</td>
-                  <td className="px-4 py-2.5">
-                    <span className={`rounded-full border px-2 py-0.5 text-xs ${u.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
-                      {u.active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                    {(u.role !== "admin" || masterAdmin) ? <button onClick={() => { setDraft({ ...u, password: "" }); setEditing(u.id); setErr(""); }}
-                      className="mr-3 text-xs font-medium text-teal-700 hover:underline">Edit</button>
-                    : null}{u.active && (u.role !== "admin" || masterAdmin) && u.employeeId !== "ADMIN001" ? (
-                      <button onClick={() => deactivate(u.id)} className="text-xs font-medium text-rose-600 hover:underline">Deactivate</button>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+          {[['all','All'],['regional_head','Regional Heads'],['city_head','City Heads'],['team_lead','Team Leads']].map(([value, label]) => <button key={value} type="button" onClick={() => setUserView(value)}
+            className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${userView === value ? "border-teal-600 bg-teal-600 text-white" : "border-slate-300 bg-white text-slate-600 hover:border-teal-300"}`}>{label}</button>)}
         </div>
+        {userView === "all" ? <div className="p-4">
+          <section>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Admins</h4>
+            <div className="overflow-hidden rounded-lg border border-slate-200">{users.filter((u) => u.role === "admin").sort((a,b) => a.name.localeCompare(b.name)).map((u) => <HierarchyRow key={u.id} user={u}/>)}</div>
+          </section>
+          <section className="mt-5">
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Regional hierarchy</h4>
+            <p className="mb-2 text-xs text-slate-500">Select a Regional Head to see their City Heads, Team Leads and Salesmen.</p>
+            <div className="overflow-hidden rounded-lg border border-slate-200">{users.filter((u) => u.role === "regional_head").sort((a,b) => a.name.localeCompare(b.name)).map((u) => <HierarchyRow key={u.id} user={u}/>)}</div>
+          </section>
+          {users.filter((u) => !["admin","regional_head"].includes(u.role) && !users.some((parent) => parent.id === u.managerId)).length ? <section className="mt-5">
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-700">Reporting manager missing</h4>
+            <div className="overflow-hidden rounded-lg border border-amber-200">{users.filter((u) => !["admin","regional_head"].includes(u.role) && !users.some((parent) => parent.id === u.managerId)).map((u) => <HierarchyRow key={u.id} user={u}/>)}</div>
+          </section> : null}
+        </div> : <div className="p-4">
+          <p className="mb-2 text-xs text-slate-500">Showing all {roleLabel(userView)} accounts. Reporting manager and territory remain visible for context.</p>
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            {users.filter((u) => u.role === userView).sort((a,b) => a.name.localeCompare(b.name)).map((u) => <HierarchyRow key={u.id} user={u}/>) }
+            {!users.some((u) => u.role === userView) ? <p className="px-4 py-8 text-center text-sm text-slate-500">No {roleLabel(userView)} accounts found.</p> : null}
+          </div>
+        </div>}
         <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
           Users are deactivated rather than deleted so their activation history and photo proof stay auditable.
         </p>

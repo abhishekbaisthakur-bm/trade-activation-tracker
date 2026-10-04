@@ -3,6 +3,14 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.1.0 — 4 October 2026
+
+- Replace the cluttered Admin user table with a collapsible reporting hierarchy.
+- Show Admins first and Regional Heads as expandable roots for City Heads, Team
+  Leads and Salesmen.
+- Add All, Regional Heads, City Heads and Team Leads quick filters.
+- Separate legacy accounts that have no reporting manager so they can be fixed.
+
 ## v1.0.1 — 4 October 2026
 
 - Show the default employee password only in the first template row.
