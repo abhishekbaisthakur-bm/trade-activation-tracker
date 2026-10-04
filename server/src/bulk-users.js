@@ -93,7 +93,9 @@ async function buildTemplate(actor, users) {
 
   for (let row = 2; row <= MAX_ROWS + 1; row += 1) {
     const passwordCol = headers.indexOf("Initial Password") + 1;
-    sheet.getCell(row, passwordCol).value = DEFAULT_PASSWORD;
+    // Show the default once as an example. Empty password cells on later
+    // employee rows receive the same default during import.
+    if (row === 2) sheet.getCell(row, passwordCol).value = DEFAULT_PASSWORD;
     sheet.getCell(row, passwordCol).numFmt = "@";
     if (isTeamLead) continue;
     const roleCell = sheet.getCell(row, headers.indexOf("Role") + 1);

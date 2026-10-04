@@ -24,11 +24,13 @@ test("templates use role-specific columns and Excel dropdown validation", async 
   assert.equal(sheet.getCell("E2").dataValidation.formulae[0], "UploadRoles");
   assert.match(sheet.getCell("F2").dataValidation.formulae[0], /Managers_/);
   assert.equal(sheet.getCell("K2").value, "12345678");
+  assert.equal(sheet.getCell("K3").value, null);
   assert.equal(adminBook.getWorksheet("Lists").state, "veryHidden");
 
   const tlBook = await buildTemplate(users[3], users);
   assert.deepEqual(tlBook.getWorksheet("Users").getRow(1).values.slice(1), TL_HEADERS);
   assert.equal(tlBook.getWorksheet("Users").getCell("F2").value, "12345678");
+  assert.equal(tlBook.getWorksheet("Users").getCell("F3").value, null);
 });
 
 test("team lead rows infer salesman, manager, territory and first password", () => {
