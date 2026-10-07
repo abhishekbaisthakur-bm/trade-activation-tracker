@@ -15,9 +15,12 @@ function buildMasterPlanFilters(q, opts = {}) {
   const where = ["ph.active = TRUE"];
   const params = [];
   const add = (sql, value) => { params.push(value); where.push(sql.replace("?", `$${params.length}`)); };
-  if (q.state) add("ph.state = ?", q.state);
-  if (q.city) add("ph.city = ?", q.city);
-  if (q.area) add("COALESCE(ph.area, 'Not specified') = ?", q.area);
+  // Uploaded master files are often inconsistent about case and spaces
+  // (for example "Tamil Nadu" vs "Tamilnadu"). Treat those as the same
+  // geography so a leader's scope and performance totals stay aligned.
+  if (q.state) add("regexp_replace(lower(COALESCE(ph.state, '')), '\\s+', '', 'g') = regexp_replace(lower(?), '\\s+', '', 'g')", q.state);
+  if (q.city) add("lower(trim(COALESCE(ph.city, ''))) = lower(trim(?))", q.city);
+  if (q.area) add("lower(trim(COALESCE(ph.area, 'Not specified'))) = lower(trim(?))", q.area);
   const leader = opts.leader;
   if (leader?.role === "regional_head") {
     params.push(leader.id);
@@ -27,8 +30,8 @@ function buildMasterPlanFilters(q, opts = {}) {
         AND ${descendantOrSelfSql(`$${params.length}`, "creator")}
     )`);
   } else if (leader) {
-    if (leader.assigned_state) add("ph.state = ?", leader.assigned_state);
-    if (leader.assigned_city) add("ph.city = ?", leader.assigned_city);
+    if (leader.assigned_state) add("regexp_replace(lower(COALESCE(ph.state, '')), '\\s+', '', 'g') = regexp_replace(lower(?), '\\s+', '', 'g')", leader.assigned_state);
+    if (leader.assigned_city) add("lower(trim(COALESCE(ph.city, ''))) = lower(trim(?))", leader.assigned_city);
   }
   return { clause: `WHERE ${where.join(" AND ")}`, params };
 }
@@ -130,6 +133,27 @@ async function summary(q, opts = {}) {
   };
 
   const [byState, byCity, byArea] = await Promise.all([dim("state"), dim("city"), dim("area")]);
+
+  // Dropdowns must reflect the active pharmacy master within the logged-in
+  // leader's hierarchy. They deliberately ignore the current city/area while
+  // building the relevant parent list, so selecting a value never makes the
+  // other valid values disappear.
+  const cityScope = buildMasterPlanFilters({ state: q.state }, opts);
+  const areaScope = buildMasterPlanFilters({ state: q.state, city: q.city }, opts);
+  const [cityOptions, areaOptions] = await Promise.all([
+    query(
+      `SELECT DISTINCT trim(ph.city) AS value FROM pharmacies ph
+       ${cityScope.clause} AND NULLIF(trim(ph.city), '') IS NOT NULL
+       ORDER BY value`,
+      cityScope.params
+    ),
+    query(
+      `SELECT DISTINCT trim(ph.area) AS value FROM pharmacies ph
+       ${areaScope.clause} AND NULLIF(trim(ph.area), '') IS NOT NULL
+       ORDER BY value`,
+      areaScope.params
+    ),
+  ]);
 
   // Asset level plan vs actual
   const actualByAsset = await query(
@@ -255,6 +279,10 @@ async function summary(q, opts = {}) {
       today: t.today,
     },
     byState, byCity, byArea, byAsset, bySales, byPeople,
+    filterOptions: {
+      cities: cityOptions.rows.map((row) => row.value),
+      areas: areaOptions.rows.map((row) => row.value),
+    },
   };
 }
 

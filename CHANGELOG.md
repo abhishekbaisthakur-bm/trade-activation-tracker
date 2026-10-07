@@ -3,6 +3,13 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.2.1 — 7 October 2026
+
+- Populate Regional Head City and Area filters from the active pharmacy master list.
+- Remove stale Mumbai/Ghatkopar options inherited from old target geography.
+- Match master geography despite harmless case or spacing differences.
+- Apply the same normalized geography rules when leaders view their master list.
+
 ## v1.2.0 — 7 October 2026
 
 - Calculate planned-shop performance from active pharmacies in the master list.

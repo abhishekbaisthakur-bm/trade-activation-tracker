@@ -405,11 +405,11 @@ function ManagerPerformance({ user, geo }) {
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <Field label="City">
           <Select value={filters.city} onChange={(city) => setFilters({ city, area: "" })}
-            options={geo.cities(user.state || "")} placeholder="All cities" disabled={!!user.city} />
+            options={data?.filterOptions?.cities || []} placeholder="All cities" disabled={!!user.city} />
         </Field>
         <Field label="Area">
           <Select value={filters.area} onChange={(area) => setFilters((f) => ({ ...f, area }))}
-            options={geo.areas(filters.city, user.state)} placeholder="All areas" />
+            options={data?.filterOptions?.areas || []} placeholder="All areas" />
         </Field>
       </div>
     </Card>
