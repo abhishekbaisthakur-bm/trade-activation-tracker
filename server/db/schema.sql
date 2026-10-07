@@ -40,6 +40,7 @@ CREATE INDEX IF NOT EXISTS pharmacies_city_idx ON pharmacies (city, area);
 -- Pharmacy names are not identifiers. Different retailers may legitimately use
 -- the same trading name in the same city; RIO ID is the master-list identifier.
 ALTER TABLE pharmacies DROP CONSTRAINT IF EXISTS pharmacies_city_name_key;
+ALTER TABLE pharmacies DROP CONSTRAINT IF EXISTS pharmacies_city_name_key_key;
 
 ALTER TABLE pharmacies ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE pharmacies ADD COLUMN IF NOT EXISTS rio_id TEXT;

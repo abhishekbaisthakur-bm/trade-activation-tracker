@@ -3,6 +3,11 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.1.3 — 7 October 2026
+
+- Remove the production database's actual legacy Pharmacy Name + City constraint.
+- Fix the remaining false RIO-conflict error during Regional Head master uploads.
+
 ## v1.1.2 — 7 October 2026
 
 - Make RIO ID the sole unique identifier for master pharmacies.
