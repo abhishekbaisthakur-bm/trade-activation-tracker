@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Store, LogOut, Send, Users, Target, Clock, Loader2, Plus, KeyRound, CheckCircle2, XCircle, Download, Upload, BarChart3 } from "lucide-react";
+import { Store, LogOut, Send, Users, Target, Clock, Loader2, Plus, KeyRound, CheckCircle2, XCircle, Download, Upload, BarChart3, ChevronDown, ChevronRight } from "lucide-react";
 import { api } from "./api";
 import BulkUsers from "./BulkUsers";
 import { APP_NAME, BRAND_LINE, ASSETS, inputCls, Field, TextInput, Select, ComboInput, Button, Card, Banner, Modal, PenTable, PenCell, statusTone } from "./ui";
@@ -466,7 +466,8 @@ function ManagerPerformance({ user, geo }) {
 
 export default function ManagerApp({ user, geo, onLogout }) {
   const [tab,setTab]=useState("overview"), [refresh,setRefresh]=useState(0), [msg,setMsg]=useState(null), [busy,setBusy]=useState(false);
-  const [teamData, setTeamData] = useState({ totals: { members: 0, salesmen: 0, storesActivated: 0, activations: 0 }, members: [], salesmen: [] });
+  const [teamData, setTeamData] = useState({ totals: { members: 0, salesmen: 0, plannedShops: 0, storesActivated: 0, activations: 0 }, members: [], salesmen: [] });
+  const [expandedPeople, setExpandedPeople] = useState([]);
   const [selectedSalesman, setSelectedSalesman] = useState(null);
   const [salesmanDetails, setSalesmanDetails] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -567,6 +568,40 @@ const openSalesman = async (salesman) => {
   }
 };
 
+const togglePerson = (id) => setExpandedPeople((current) =>
+  current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+);
+
+const hierarchyMembers = teamData.members || teamData.salesmen || [];
+const childrenOf = (id) => hierarchyMembers.filter((person) => person.managerId === id);
+const firstLevelRole = user.role === "regional_head" ? "city_head" : user.role === "city_head" ? "team_lead" : "field";
+const firstLevel = childrenOf(user.id).filter((person) => person.role === firstLevelRole);
+
+const hierarchyRow = (person, depth = 0) => {
+  const children = childrenOf(person.id);
+  const expandable = person.role !== "field" && children.length > 0;
+  const expanded = expandedPeople.includes(person.id);
+  return <React.Fragment key={person.id}>
+    <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-3 ${depth ? "border-l-2 border-teal-100" : ""}`} style={{ marginLeft: `${depth * 20}px` }}>
+      <div className="flex min-w-0 items-center gap-2">
+        {expandable ? <button type="button" onClick={()=>togglePerson(person.id)} className="rounded p-1 text-slate-500 hover:bg-slate-100" aria-label={`${expanded ? "Collapse" : "Expand"} ${person.name}`}>
+          {expanded ? <ChevronDown size={17}/> : <ChevronRight size={17}/>} 
+        </button> : <span className="w-7"/>}
+        <div className="min-w-0">
+          {person.role === "field" ? <button type="button" className="truncate font-medium text-teal-700 hover:underline" onClick={()=>openSalesman({...person,employee_id:person.employeeId})}>{person.name}</button> : <p className="truncate font-medium text-slate-900">{person.name}</p>}
+          <p className="text-xs text-slate-500">{person.roleLabel || roleLabel(person.role)} · {person.employeeId || person.employee_id}{person.city ? ` · ${person.city}` : ""}</p>
+        </div>
+      </div>
+      <div className="flex gap-6 text-right text-xs text-slate-500">
+        <div><p className="font-semibold text-slate-900">{person.shops ?? person.shops_activated ?? 0}</p><p>stores</p></div>
+        <div><p className="font-semibold text-slate-900">{person.activations ?? 0}</p><p>activations</p></div>
+        {expandable ? <div><p className="font-semibold text-slate-900">{children.length}</p><p>direct reports</p></div> : null}
+      </div>
+    </div>
+    {expanded ? children.map((child)=>hierarchyRow(child, depth + 1)) : null}
+  </React.Fragment>;
+};
+
 const reviewActivation = async (activationId, status) => {
   setBusy(true);
   setMsg(null);
@@ -649,8 +684,13 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 <I size={15}/>{l}</button>)}</div>
 </div>
 </header>
-<main className="mx-auto max-w-3xl space-y-4 px-4 py-5">{showPassword?<ChangePassword onClose={()=>setShowPassword(false)}/>:<>{msg?<Banner kind={msg.kind}>{msg.text}</Banner>:null}{tab==='overview'?<div className="space-y-4">
-<div className="grid gap-3 md:grid-cols-3">
+<main className="mx-auto max-w-6xl space-y-4 px-4 py-5">{showPassword?<ChangePassword onClose={()=>setShowPassword(false)}/>:<>{msg?<Banner kind={msg.kind}>{msg.text}</Banner>:null}{tab==='overview'?<div className="space-y-4">
+<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+<Card className="p-4">
+<p className="text-sm text-slate-500">Total target stores</p>
+<p className="mt-1 text-2xl font-semibold">{(teamData.totals.plannedShops || 0).toLocaleString("en-IN")}</p>
+<p className="text-xs text-slate-500">Active shops in your master list</p>
+</Card>
 <Card className="p-4">
 <p className="text-sm text-slate-500">My team</p>
 <p className="mt-1 text-2xl font-semibold">{teamData.totals.members ?? teamData.totals.salesmen}</p>
@@ -667,36 +707,12 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 </div>
 <Card className="overflow-hidden">
 <div className="border-b border-slate-200 px-4 py-3">
-<h2 className="font-semibold">Team hierarchy and performance</h2>
+<h2 className="font-semibold">Team hierarchy</h2>
+<p className="mt-1 text-xs text-slate-500">Open a City Head to see Team Leads, then open a Team Lead to see Salesmen.</p>
 </div>
-<div className="overflow-x-auto">
-<table className="w-full text-sm">
-<thead className="bg-slate-50 text-slate-500">
-<tr>
-<th className="px-4 py-3 text-left">Person</th>
-<th className="px-4 py-3 text-left">Employee ID</th>
-<th className="px-4 py-3 text-left">Role</th>
-<th className="px-4 py-3 text-left">Reports to</th>
-<th className="px-4 py-3 text-left">Territory</th>
-<th className="px-4 py-3 text-right">Stores activated</th>
-<th className="px-4 py-3 text-right">Activations</th>
-</tr>
-</thead>
-<tbody className="divide-y divide-slate-100">{(teamData.members||teamData.salesmen).map(s=>
-<tr key={s.id}>
-<td className="px-4 py-3 font-medium">
-{s.role==='field'?<button type="button" className="text-teal-700 hover:underline" onClick={()=>openSalesman({...s,employee_id:s.employeeId,state:s.state,city:s.city})}>{s.name}</button>:s.name}
-</td>
-<td className="px-4 py-3">{s.employeeId||s.employee_id}</td>
-<td className="px-4 py-3">{s.roleLabel||'Salesman'}</td>
-<td className="px-4 py-3">{s.reportingManager||'—'}</td>
-<td className="px-4 py-3">{[s.city,s.state,s.region].filter(Boolean).join(', ')||'—'}</td>
-<td className="px-4 py-3 text-right font-medium">{s.shops??s.shops_activated}</td>
-<td className="px-4 py-3 text-right">{s.activations}</td>
-</tr>)}{!(teamData.members||teamData.salesmen).length?<tr>
-<td colSpan="7" className="px-4 py-8 text-center text-slate-400">No City Heads, Team Leads or Salesmen are assigned below you yet.</td>
-</tr>:null}</tbody>
-</table>
+<div className="divide-y divide-slate-100 text-sm">
+{firstLevel.map((person)=>hierarchyRow(person))}
+{!firstLevel.length?<div className="px-4 py-8 text-center text-slate-400">No {roleLabel(firstLevelRole)} is assigned directly below you yet.</div>:null}
 </div>
 </Card>{selectedSalesman?<Card className="p-5">
 <div className="mb-4 flex items-center justify-between">

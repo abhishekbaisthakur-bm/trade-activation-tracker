@@ -3,6 +3,13 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.3.0 — 7 October 2026
+
+- Show the Regional Head's total active master-list stores on Overview.
+- Replace the cluttered flat team table with a collapsible hierarchy.
+- Show City Heads first, then Team Leads, then Salesmen on expansion.
+- Keep store and activation results visible in compact hierarchy rows.
+
 ## v1.2.1 — 7 October 2026
 
 - Populate Regional Head City and Area filters from the active pharmacy master list.

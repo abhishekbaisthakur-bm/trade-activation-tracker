@@ -244,7 +244,8 @@ async function summary(q, opts = {}) {
     return {
       id: person.id, name: person.name, employeeId: person.employee_id,
       role: person.role, roleLabel: ROLE_LABELS[person.role], region: person.region,
-      state: person.state, city: person.city, reportingManager: person.reporting_manager_name,
+      state: person.state, city: person.city, managerId: person.manager_id,
+      reportingManager: person.reporting_manager_name,
       teamSize: salespeople.length, shops, activations, installed, target, completion: pct(shops, target),
     };
   }).sort((a, b) => (roleOrder[a.role] - roleOrder[b.role]) || b.shops - a.shops || a.name.localeCompare(b.name));
@@ -299,6 +300,7 @@ router.get("/manager/team", requireRole(...LEADER_ROLES), async (req, res, next)
       totals: {
         members: members.length,
         salesmen: salesmen.length,
+        plannedShops: data.totals.plannedShops,
         storesActivated: totalStoresActivated,
         activations: totalActivations
       },
