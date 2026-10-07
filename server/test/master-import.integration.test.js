@@ -12,7 +12,7 @@ const safe = (() => {
   catch { return false; }
 })();
 
-test("Regional Head master CSV import is atomic and reports shop conflicts", { skip: !safe, timeout: 30000 }, async (t) => {
+test("Regional Head master CSV import uses RIO ID and permits repeated names", { skip: !safe, timeout: 30000 }, async (t) => {
   const schema = `master_test_${crypto.randomUUID().replace(/-/g, "")}`;
   const admin = new Client({ connectionString: baseUrl });
   await admin.connect();
@@ -59,11 +59,9 @@ test("Regional Head master CSV import is atomic and reports shop conflicts", { s
   assert.equal(valid.status, 200, await valid.text());
   assert.equal((await db.query("SELECT count(*)::int AS count FROM pharmacies WHERE rio_id='RIO-NEW'")).rows[0].count, 1);
 
-  const conflict = await upload("Pharmacy Name,Rio Id,Party/Alt Code,Address (optional),City (optional),State (Optional)\nShould Roll Back,RIO-ROLLBACK,ALT-1,Address,Mumbai,Maharashtra\nExisting Shop,RIO-DIFFERENT,ALT-2,Address,Mumbai,Maharashtra\n");
-  assert.equal(conflict.status, 409);
-  const body = await conflict.json();
-  assert.match(body.error, /Row 3: Existing Shop already exists/);
-  assert.equal((await db.query("SELECT count(*)::int AS count FROM pharmacies WHERE rio_id='RIO-ROLLBACK'")).rows[0].count, 0);
+  const repeatedName = await upload("Pharmacy Name,Rio Id,Party/Alt Code,Address (optional),City (optional),State (Optional)\nExisting Shop,RIO-DIFFERENT,ALT-2,Other address,Mumbai,Maharashtra\n");
+  assert.equal(repeatedName.status, 200, await repeatedName.text());
+  assert.equal((await db.query("SELECT count(*)::int AS count FROM pharmacies WHERE name_key='existing shop' AND city='Mumbai'")).rows[0].count, 2);
 
   const duplicate = await upload("Pharmacy Name,Rio Id,Party/Alt Code\nOne,RIO-DUP,ALT-1\nTwo,RIO-DUP,ALT-2\n");
   assert.equal(duplicate.status, 400);

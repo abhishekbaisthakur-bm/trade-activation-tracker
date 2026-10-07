@@ -3,6 +3,13 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.1.2 — 7 October 2026
+
+- Make RIO ID the sole unique identifier for master pharmacies.
+- Allow different retailers to share the same pharmacy name and city.
+- Fix Regional Head imports of real master files containing repeated trade names.
+- Preserve duplicate-RIO validation and atomic CSV imports.
+
 ## v1.1.1 — 7 October 2026
 
 - Fix Regional Head pharmacy master CSV uploads failing with a generic server error.

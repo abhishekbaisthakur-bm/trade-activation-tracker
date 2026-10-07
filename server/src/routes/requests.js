@@ -516,13 +516,6 @@ router.post("/master-pharmacies/import", requireRole("admin", "regional_head"), 
       for (const p of items) {
         const nameKey = p.name.toLowerCase().replace(/\s+/g, " ");
         const rioMatch = await client.query("SELECT id FROM pharmacies WHERE rio_id=$1", [p.rioId]);
-        const shopMatch = p.city ? await client.query(
-          "SELECT id,rio_id FROM pharmacies WHERE city=$1 AND name_key=$2 AND ($3::uuid IS NULL OR id<>$3)",
-          [p.city, nameKey, rioMatch.rows[0]?.id || null]
-        ) : { rows: [] };
-        if (shopMatch.rows[0]) {
-          throw Object.assign(new Error(`Row ${p.rowNumber}: ${p.name} already exists in ${p.city} with RIO ID ${shopMatch.rows[0].rio_id || "not set"}. Use that RIO ID or edit the existing shop.`), { status: 409 });
-        }
         if (rioMatch.rows[0]) {
           await client.query(
             `UPDATE pharmacies SET name=$1,name_key=$2,party_alt_code=$3,address=$4,state=$5,city=$6,active=TRUE
@@ -543,7 +536,7 @@ router.post("/master-pharmacies/import", requireRole("admin", "regional_head"), 
     res.json({ imported });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
-    if (err.code === "23505") return res.status(409).json({ error: "The upload contains a duplicate RIO ID or a pharmacy that already exists in the same city. No rows were imported." });
+    if (err.code === "23505") return res.status(409).json({ error: "The upload contains a RIO ID that is already assigned to another pharmacy. No rows were imported." });
     next(err);
   }
 });
@@ -588,21 +581,22 @@ router.post("/master-data/:id/approve", requireRole("regional_head"), async (req
         throw Object.assign(new Error("This master-data review is no longer pending."), { status: 409 });
       }
       const p = row.payload;
-      const pharmacy = await client.query(
-        `INSERT INTO pharmacies
-           (name, name_key, address, state, city, area, latitude, longitude, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-         ON CONFLICT (city, name_key) DO UPDATE SET
-           name = EXCLUDED.name,
-           address = EXCLUDED.address,
-           state = EXCLUDED.state,
-           area = EXCLUDED.area,
-           latitude = EXCLUDED.latitude,
-           longitude = EXCLUDED.longitude
-         RETURNING id`,
-        [p.pharmacyName, p.nameKey, p.address || null, p.state, p.city, p.area,
-         p.latitude ?? null, p.longitude ?? null, row.submitted_by]
+      let pharmacy = await client.query(
+        `SELECT id FROM pharmacies
+         WHERE name_key=$1 AND state=$2 AND city=$3 AND area IS NOT DISTINCT FROM $4
+         ORDER BY created_at LIMIT 1`,
+        [p.nameKey, p.state, p.city, p.area]
       );
+      if (!pharmacy.rows[0]) {
+        pharmacy = await client.query(
+          `INSERT INTO pharmacies
+             (name, name_key, address, state, city, area, latitude, longitude, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           RETURNING id`,
+          [p.pharmacyName, p.nameKey, p.address || null, p.state, p.city, p.area,
+           p.latitude ?? null, p.longitude ?? null, row.submitted_by]
+        );
+      }
       const plan = p.area ? await client.query(
         `INSERT INTO planned_targets (state, city, area, planned_shops)
          VALUES ($1,$2,$3,0)

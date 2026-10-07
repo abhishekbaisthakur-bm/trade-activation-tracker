@@ -103,7 +103,10 @@ async function main() {
         const name = `${base} - ${area}`;
         await query(
           `INSERT INTO pharmacies (name, name_key, address, state, city, area)
-           VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (city, name_key) DO NOTHING`,
+           SELECT $1,$2,$3,$4,$5,$6
+           WHERE NOT EXISTS (
+             SELECT 1 FROM pharmacies WHERE city=$5 AND name_key=$2 AND area IS NOT DISTINCT FROM $6
+           )`,
           [name, name.toLowerCase(), `${area}, ${g.city}`, g.state, g.city, area]
         );
         shops += 1;
