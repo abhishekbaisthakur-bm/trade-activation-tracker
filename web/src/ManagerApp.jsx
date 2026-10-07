@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Store, LogOut, Send, Users, Target, Clock, Loader2, Plus, KeyRound, CheckCircle2, XCircle, Download, Upload, BarChart3 } from "lucide-react";
 import { api } from "./api";
 import BulkUsers from "./BulkUsers";
-import { APP_NAME, BRAND_LINE, ASSETS, inputCls, Field, TextInput, Select, ComboInput, Button, Card, Banner, PenTable, PenCell, statusTone } from "./ui";
+import { APP_NAME, BRAND_LINE, ASSETS, inputCls, Field, TextInput, Select, ComboInput, Button, Card, Banner, Modal, PenTable, PenCell, statusTone } from "./ui";
 
 const emptyAssets = Object.fromEntries(ASSETS.map(a => [a.key, 0]));
 const emptyTarget = () => ({ state:"", city:"", area:"", plannedShops:0, changeType:"addition", assets:{...emptyAssets} });
@@ -10,6 +10,20 @@ const emptyField = () => ({ name:"", employeeId:"", mobile:"", email:"", role:"f
 const roleLabel = (role) => ({ regional_head:"Regional Head", city_head:"City Head", team_lead:"Team Lead", field:"Salesman" }[role] || role);
 const childRoles = { regional_head:["city_head","team_lead","field"], city_head:["team_lead","field"], team_lead:["field"] };
 const parentRoles = { city_head:["regional_head"], team_lead:["regional_head","city_head"], field:["regional_head","city_head","team_lead"] };
+
+function PageControls({ pagination, onPage }) {
+  if (!pagination?.total) return null;
+  const from = (pagination.page - 1) * pagination.pageSize + 1;
+  const to = Math.min(pagination.total, pagination.page * pagination.pageSize);
+  return <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 text-xs text-slate-500">
+    <span>Showing {from}–{to} of {pagination.total.toLocaleString("en-IN")}</span>
+    <div className="flex items-center gap-2">
+      <Button variant="ghost" size="sm" disabled={pagination.page <= 1} onClick={()=>onPage(pagination.page - 1)}>Previous</Button>
+      <span>Page {pagination.page} of {pagination.pages}</span>
+      <Button variant="ghost" size="sm" disabled={pagination.page >= pagination.pages} onClick={()=>onPage(pagination.page + 1)}>Next</Button>
+    </div>
+  </div>;
+}
 
 function RequestHistory({ refresh }) {
   const [items,setItems]=useState([]); const [error,setError]=useState("");
@@ -47,29 +61,31 @@ function RequestHistory({ refresh }) {
 function ReadOnlyMasterList() {
   const [shops, setShops] = useState([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(null);
   const [error, setError] = useState("");
   useEffect(() => {
     let live = true;
-    const timer = setTimeout(() => api.masterPharmacies(search).then((result) => {
-      if (live) { setShops(result.pharmacies); setError(""); }
+    const timer = setTimeout(() => api.masterPharmacies(search, page).then((result) => {
+      if (live) { setShops(result.pharmacies); setPagination(result.pagination); setError(""); }
     }).catch((e) => live && setError(e.message)), search ? 250 : 0);
     return () => { live = false; clearTimeout(timer); };
-  }, [search]);
+  }, [search, page]);
   return <div className="space-y-3">
     {error ? <Banner kind="error">{error}</Banner> : null}
     <Card className="overflow-hidden">
       <div className="border-b border-slate-200 px-4 py-3">
         <h3 className="text-sm font-semibold">Master list</h3>
         <p className="text-xs text-slate-500">Read-only pharmacies for your assigned location.</p>
-        <TextInput value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Search pharmacy, RIO ID, Party/Alt Code or city" className="mt-3"/>
+        <TextInput value={search} onChange={(e)=>{setSearch(e.target.value);setPage(1)}} placeholder="Search pharmacy, RIO ID, Party/Alt Code or city" className="mt-3"/>
       </div>
       <div className="overflow-x-auto"><table className="w-full text-sm">
         <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">Pharmacy</th><th className="px-3 py-2">Geography</th><th className="px-3 py-2">Status</th></tr></thead>
         <tbody className="divide-y divide-slate-100">{shops.map((shop)=><tr key={shop.id}>
-          <td className="px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_code||"—"}</p><p className="text-xs text-slate-500">{shop.address||"—"}</p></td>
+          <td className="max-w-xl px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_code||"—"}</p><p className="truncate text-xs text-slate-500" title={shop.address||""}>{shop.address||"—"}</p></td>
           <td className="px-3 py-2">{[shop.city,shop.state].filter(Boolean).join(", ")||"—"}</td><td className="px-3 py-2">{shop.active?"Active":"Inactive"}</td>
         </tr>)}{!shops.length?<tr><td colSpan="3" className="px-4 py-8 text-center text-slate-400">No master shops found for your location.</td></tr>:null}</tbody>
-      </table></div>
+      </table></div><PageControls pagination={pagination} onPage={setPage}/>
     </Card>
   </div>;
 }
@@ -78,24 +94,38 @@ function MasterDataReviews({ canManage }) {
   const [items, setItems] = useState([]);
   const [shops, setShops] = useState([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(null);
   const [editing, setEditing] = useState(null);
-  const [mergeTargets, setMergeTargets] = useState({});
+  const [mergeSource, setMergeSource] = useState(null);
+  const [mergeSearch, setMergeSearch] = useState("");
+  const [mergeOptions, setMergeOptions] = useState([]);
+  const [mergeTarget, setMergeTarget] = useState("");
   const [draft, setDraft] = useState({ name:"", rioId:"", partyAltCode:"", address:"", state:"", city:"" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
-  const load = async () => {
+  const load = async (nextPage = page) => {
     try {
-      const [reviews, master] = await Promise.all([canManage ? api.masterDataReviews() : Promise.resolve({ reviews: [] }), api.masterPharmacies(search)]);
-      setItems(reviews.reviews); setShops(master.pharmacies); setError("");
+      const [reviews, master] = await Promise.all([canManage ? api.masterDataReviews() : Promise.resolve({ reviews: [] }), api.masterPharmacies(search, nextPage)]);
+      setItems(reviews.reviews); setShops(master.pharmacies); setPagination(master.pagination); setError("");
     } catch (e) { setError(e.message); }
   };
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => api.masterPharmacies(search).then((r) => setShops(r.pharmacies)).catch((e) => setError(e.message)), 250);
+    const timer = setTimeout(() => api.masterPharmacies(search, page).then((r) => {setShops(r.pharmacies);setPagination(r.pagination)}).catch((e) => setError(e.message)), 250);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, page]);
+
+  useEffect(() => {
+    if (!mergeSource) return;
+    let live = true;
+    const timer = setTimeout(() => api.masterPharmacies(mergeSearch, 1, 25).then((r) => {
+      if (live) setMergeOptions(r.pharmacies.filter((shop)=>shop.id!==mergeSource.id&&shop.active));
+    }).catch((e)=>live&&setError(e.message)), mergeSearch ? 250 : 0);
+    return () => { live = false; clearTimeout(timer); };
+  }, [mergeSource, mergeSearch]);
 
   const act = async (id, action) => {
     setBusy(`${id}:${action}`);
@@ -204,29 +234,42 @@ function MasterDataReviews({ canManage }) {
       <Card className="overflow-hidden">
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="text-sm font-semibold">Territory master list</h3>
-          <TextInput value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Search pharmacy, RIO ID, Party/Alt Code or city" className="mt-3"/>
+          <TextInput value={search} onChange={(e)=>{setSearch(e.target.value);setPage(1)}} placeholder="Search pharmacy, RIO ID, Party/Alt Code or city" className="mt-3"/>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">Shop</th><th className="px-3 py-2">Geography</th><th className="px-3 py-2">Status</th>{canManage?<th className="px-3 py-2">Actions</th>:null}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {shops.map((shop)=><tr key={shop.id}>
-                <td className="px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_code||"—"}</p><p className="text-xs text-slate-500">{shop.address||"—"}</p></td>
-                <td className="px-3 py-2">{[shop.city,shop.state].filter(Boolean).join(", ")||"—"}</td>
-                <td className="px-3 py-2">{shop.active ? "Active" : "Inactive"}</td>
-                {canManage?<td className="px-3 py-2"><div className="flex min-w-80 flex-wrap gap-2">
+                <td className="max-w-xl px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_code||"—"}</p><p className="truncate text-xs text-slate-500" title={shop.address||""}>{shop.address||"—"}</p></td>
+                <td className="whitespace-nowrap px-3 py-2">{[shop.city,shop.state].filter(Boolean).join(", ")||"—"}</td>
+                <td className="whitespace-nowrap px-3 py-2">{shop.active ? "Active" : "Inactive"}</td>
+                {canManage?<td className="px-3 py-2"><div className="flex flex-wrap gap-2">
                   <Button variant="ghost" size="sm" onClick={()=>{setEditing(shop.id);setDraft({name:shop.name,rioId:shop.rio_id||"",partyAltCode:shop.party_alt_code||"",address:shop.address||"",state:shop.state||"",city:shop.city||""})}}>Edit</Button>
                   {shop.active?<Button variant="danger" size="sm" onClick={async()=>{setBusy(shop.id);try{await api.deactivateMasterPharmacy(shop.id);await load()}catch(e){setError(e.message)}finally{setBusy("")}}}>Deactivate</Button>:null}
-                  <select className={inputCls} value={mergeTargets[shop.id]||""} onChange={(e)=>setMergeTargets({...mergeTargets,[shop.id]:e.target.value})}>
-                  </select>
-                  <Button variant="ghost" size="sm" disabled={!mergeTargets[shop.id]} onClick={async()=>{setBusy(`merge:${shop.id}`);try{await api.mergeMasterPharmacy(shop.id,mergeTargets[shop.id]);await load()}catch(e){setError(e.message)}finally{setBusy("")}}}>Merge</Button>
+                  <Button variant="ghost" size="sm" onClick={()=>{setMergeSource(shop);setMergeSearch("");setMergeTarget("")}}>Merge duplicate</Button>
                 </div></td>:null}
               </tr>)}
               {!shops.length?<tr><td colSpan={canManage?4:3} className="px-4 py-8 text-center text-slate-400">No master shops found for your location.</td></tr>:null}
             </tbody>
           </table>
         </div>
+        <PageControls pagination={pagination} onPage={setPage}/>
       </Card>
+      {mergeSource ? <Modal title={`Merge ${mergeSource.name}`} onClose={()=>setMergeSource(null)}>
+        <p className="mb-3 text-sm text-slate-600">Choose the verified shop to keep. Activations will move to it and this duplicate will be deactivated.</p>
+        <Field label="Search target shop"><TextInput value={mergeSearch} onChange={(e)=>{setMergeSearch(e.target.value);setMergeTarget("")}} placeholder="Search name, RIO ID or Party/Alt Code"/></Field>
+        <Field label="Keep this shop" required>
+          <select className={inputCls} value={mergeTarget} onChange={(e)=>setMergeTarget(e.target.value)}>
+            <option value="">Select a target shop</option>
+            {mergeOptions.map((shop)=><option key={shop.id} value={shop.id}>{shop.name} · RIO {shop.rio_id||"—"} · {shop.city||"—"}</option>)}
+          </select>
+        </Field>
+        <div className="mt-4 flex gap-2">
+          <Button disabled={!mergeTarget||busy===`merge:${mergeSource.id}`} onClick={async()=>{setBusy(`merge:${mergeSource.id}`);try{await api.mergeMasterPharmacy(mergeSource.id,mergeTarget);setMergeSource(null);await load()}catch(e){setError(e.message)}finally{setBusy("")}}}>Merge duplicate</Button>
+          <Button variant="ghost" onClick={()=>setMergeSource(null)}>Cancel</Button>
+        </div>
+      </Modal> : null}
     </div>
   );
 }

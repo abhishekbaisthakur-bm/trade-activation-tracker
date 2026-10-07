@@ -11,6 +11,28 @@ router.use(requireAuth);
 
 const pct = (a, b) => (!b ? 0 : Math.round((a / b) * 1000) / 10);
 
+function buildMasterPlanFilters(q, opts = {}) {
+  const where = ["ph.active = TRUE"];
+  const params = [];
+  const add = (sql, value) => { params.push(value); where.push(sql.replace("?", `$${params.length}`)); };
+  if (q.state) add("ph.state = ?", q.state);
+  if (q.city) add("ph.city = ?", q.city);
+  if (q.area) add("COALESCE(ph.area, 'Not specified') = ?", q.area);
+  const leader = opts.leader;
+  if (leader?.role === "regional_head") {
+    params.push(leader.id);
+    where.push(`EXISTS (
+      SELECT 1 FROM users creator
+      WHERE creator.id = ph.created_by
+        AND ${descendantOrSelfSql(`$${params.length}`, "creator")}
+    )`);
+  } else if (leader) {
+    if (leader.assigned_state) add("ph.state = ?", leader.assigned_state);
+    if (leader.assigned_city) add("ph.city = ?", leader.assigned_city);
+  }
+  return { clause: `WHERE ${where.join(" AND ")}`, params };
+}
+
 /**
  * All aggregation happens in Postgres. The dashboard never downloads the raw
  * activation table, so the numbers stay correct and fast as the data grows.
@@ -21,6 +43,7 @@ async function summary(q, opts = {}) {
     ? clause
     : (clause ? clause + " AND a.status <> 'Rejected'" : "WHERE a.status <> 'Rejected'");
   const plan = buildPlanFilters(q, 0, opts);
+  const masterPlan = buildMasterPlanFilters(q, opts);
   const planParams = q.asset ? [...plan.params, q.asset] : plan.params;
 
   const dim = async (col) => {
@@ -60,6 +83,20 @@ async function summary(q, opts = {}) {
        GROUP BY ${planGroup}`,
       planParams
     );
+    const masterColumns = col === "state" ? ["state"] : col === "city" ? ["state", "city"] : ["state", "city", "area"];
+    const masterExpr = (name) => `COALESCE(ph.${name}, 'Not specified')`;
+    const masterGroups = masterColumns.map(masterExpr);
+    const masterShops = await query(
+      `SELECT concat_ws(chr(31), ${masterGroups.join(", ")}) AS map_key,
+              ${masterExpr(col)} AS key,
+              MIN(${masterExpr("state")}) AS state,
+              MIN(${masterExpr("city")}) AS city,
+              COUNT(DISTINCT ph.id)::int AS planned_shops
+       FROM pharmacies ph
+       ${masterPlan.clause}
+       GROUP BY ${masterGroups.join(", ")}`,
+      masterPlan.params
+    );
     const map = new Map();
     plans.rows.forEach((r) =>
       map.set(r.map_key, {
@@ -67,6 +104,14 @@ async function summary(q, opts = {}) {
         activatedShops: 0, installed: 0, activations: 0,
       })
     );
+    masterShops.rows.forEach((r) => {
+      const cur = map.get(r.map_key) || {
+        key: r.key, state: r.state, city: r.city, plannedShops: 0, plannedAssets: 0,
+        activatedShops: 0, installed: 0, activations: 0,
+      };
+      cur.plannedShops = r.planned_shops;
+      map.set(r.map_key, cur);
+    });
     acts.rows.forEach((r) => {
       const cur = map.get(r.map_key) || {
         key: r.key, state: r.state, city: r.city, plannedShops: 0, plannedAssets: 0,
@@ -125,10 +170,7 @@ async function summary(q, opts = {}) {
      GROUP BY u.id ORDER BY shops DESC`,
     q.asset ? [...params, q.asset] : params
   );
-  const cityPlans = await query(
-    "SELECT city, SUM(planned_shops)::int AS planned FROM planned_targets GROUP BY city"
-  );
-  const cityPlanMap = Object.fromEntries(cityPlans.rows.map((r) => [r.city, r.planned]));
+  const cityPlanMap = Object.fromEntries(byCity.map((r) => [r.key, r.plannedShops]));
   const headcount = {};
   sales.rows.forEach((r) => { headcount[r.city] = (headcount[r.city] || 0) + 1; });
   const bySales = sales.rows.map((r) => {
@@ -192,8 +234,8 @@ async function summary(q, opts = {}) {
     params
   );
   const totalsPlan = await query(
-    `SELECT COALESCE(SUM(p.planned_shops), 0)::int AS shops FROM planned_targets p ${plan.clause}`,
-    plan.params
+    `SELECT COUNT(DISTINCT ph.id)::int AS shops FROM pharmacies ph ${masterPlan.clause}`,
+    masterPlan.params
   );
 
   const plannedAssets = byAsset.reduce((s, a) => s + a.planned, 0);
@@ -219,7 +261,7 @@ async function summary(q, opts = {}) {
 // Manager dashboard: only salespeople assigned to the logged-in manager.
 router.get("/manager/team", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
-    const data = await summary({}, { ancestorId: req.user.id });
+    const data = await summary({}, { ancestorId: req.user.id, leader: req.user });
     const members = data.byPeople.filter((person) => person.id !== req.user.id);
     const salesmen = members.filter((person) => person.role === "field");
     const totalStoresActivated = salesmen.reduce((sum, person) => sum + person.shops, 0);
@@ -319,7 +361,7 @@ router.get("/manager/team/:userId/activations", requireRole(...LEADER_ROLES), as
 router.get("/manager/summary", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const scoped = { ...req.query };
-    const data = await summary(scoped, { ancestorId: req.user.id });
+    const data = await summary(scoped, { ancestorId: req.user.id, leader: req.user });
     res.json(data);
   } catch (err) {
     next(err);
@@ -337,7 +379,7 @@ router.get("/summary", requireAdmin, async (req, res, next) => {
 router.get("/export/performance.xlsx", requireRole("admin", ...LEADER_ROLES), async (req, res, next) => {
   try {
     const leader = LEADER_ROLES.includes(req.user.role);
-    const opts = leader ? { ancestorId: req.user.id } : {};
+    const opts = leader ? { ancestorId: req.user.id, leader: req.user } : {};
     const data = await summary(req.query, opts);
     const { clause, params } = buildFilters(req.query, opts);
     const records = await query(

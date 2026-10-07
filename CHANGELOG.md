@@ -3,6 +3,13 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.2.0 — 7 October 2026
+
+- Calculate planned-shop performance from active pharmacies in the master list.
+- Scope Regional Head planned counts to master shops uploaded by their hierarchy.
+- Replace the blank merge dropdown with a searchable, explained merge dialog.
+- Show the master list in compact pages of 10 rows with totals and navigation.
+
 ## v1.1.3 — 7 October 2026
 
 - Remove the production database's actual legacy Pharmacy Name + City constraint.

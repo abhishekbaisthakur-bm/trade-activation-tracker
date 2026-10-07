@@ -147,8 +147,8 @@ updateFieldUser: (id, patch) =>
     request(`/requests/master-data/${id}/approve`, { method: "POST", body: { note } }),
   rejectMasterData: (id, note) =>
     request(`/requests/master-data/${id}/reject`, { method: "POST", body: { note } }),
-  masterPharmacies: (search = "") =>
-    request(`/requests/master-pharmacies${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  masterPharmacies: (search = "", page = 1, pageSize = 10) =>
+    request(`/requests/master-pharmacies${qs({ search, page, pageSize })}`),
   saveMasterPharmacy: (pharmacy) =>
     request("/requests/master-pharmacies", { method: "POST", body: pharmacy }),
   updateMasterPharmacy: (id, pharmacy) =>

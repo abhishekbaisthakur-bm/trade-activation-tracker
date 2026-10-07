@@ -375,15 +375,20 @@ async function ensureGeography(client, state, city, area) {
 router.get("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const search = String(req.query.search || "").trim().toLowerCase();
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(10, parseInt(req.query.pageSize, 10) || 10));
     const params = [search];
     let where = "WHERE ($1::text = '' OR lower(p.name) LIKE '%' || $1 || '%' OR lower(COALESCE(p.rio_id,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.party_alt_code,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.city,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.area,'')) LIKE '%' || $1 || '%')";
     if (req.user.assigned_state) { params.push(req.user.assigned_state); where += ` AND p.state = $${params.length}`; }
     if (req.user.assigned_city) { params.push(req.user.assigned_city); where += ` AND p.city = $${params.length}`; }
+    const count = await query(`SELECT COUNT(*)::int AS total FROM pharmacies p ${where}`, params);
+    params.push(pageSize, (page - 1) * pageSize);
     const { rows } = await query(
-      `SELECT p.* FROM pharmacies p ${where} ORDER BY p.active DESC, p.name LIMIT 500`,
+      `SELECT p.* FROM pharmacies p ${where} ORDER BY p.active DESC, p.name, p.rio_id
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
-    res.json({ pharmacies: rows });
+    res.json({ pharmacies: rows, pagination: { page, pageSize, total: count.rows[0].total, pages: Math.max(1, Math.ceil(count.rows[0].total / pageSize)) } });
   } catch (err) { next(err); }
 });
 
