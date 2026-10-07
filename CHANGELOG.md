@@ -3,6 +3,13 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.1.1 — 7 October 2026
+
+- Fix Regional Head pharmacy master CSV uploads failing with a generic server error.
+- Report the exact row when Pharmacy Name + City conflicts with an existing RIO ID.
+- Report duplicate RIO IDs inside the uploaded file by row.
+- Keep failed imports atomic so no earlier rows are partially saved.
+
 ## v1.1.0 — 4 October 2026
 
 - Replace the cluttered Admin user table with a collapsible reporting hierarchy.

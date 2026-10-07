@@ -503,17 +503,39 @@ router.post("/master-pharmacies/import", requireRole("admin", "regional_head"), 
     }));
     const invalid = items.find((p) => !p.name || !p.rioId || !p.partyAltCode);
     if (invalid) return res.status(400).json({ error: `Row ${invalid.rowNumber}: Pharmacy Name, RIO ID and Party/Alt Code are required.` });
+    const seenRioIds = new Map();
+    const duplicateRio = items.find((p) => {
+      const firstRow = seenRioIds.get(p.rioId);
+      if (firstRow) { p.duplicateOfRow = firstRow; return true; }
+      seenRioIds.set(p.rioId, p.rowNumber);
+      return false;
+    });
+    if (duplicateRio) return res.status(400).json({ error: `Row ${duplicateRio.rowNumber}: RIO ID ${duplicateRio.rioId} is already used on row ${duplicateRio.duplicateOfRow}.` });
     items.forEach((p) => assertManagerTerritory(req.user, p));
     const imported = await withTransaction(async (client) => {
       for (const p of items) {
         const nameKey = p.name.toLowerCase().replace(/\s+/g, " ");
-        await client.query(
-          `INSERT INTO pharmacies (name,name_key,rio_id,party_alt_code,address,state,city,area,created_by,active)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,TRUE)
-           ON CONFLICT (rio_id) WHERE rio_id IS NOT NULL DO UPDATE SET name=EXCLUDED.name,name_key=EXCLUDED.name_key,
-             party_alt_code=EXCLUDED.party_alt_code,address=EXCLUDED.address,state=EXCLUDED.state,city=EXCLUDED.city,active=TRUE`,
-          [p.name,nameKey,p.rioId,p.partyAltCode,p.address||null,p.state||null,p.city||null,req.user.id]
-        );
+        const rioMatch = await client.query("SELECT id FROM pharmacies WHERE rio_id=$1", [p.rioId]);
+        const shopMatch = p.city ? await client.query(
+          "SELECT id,rio_id FROM pharmacies WHERE city=$1 AND name_key=$2 AND ($3::uuid IS NULL OR id<>$3)",
+          [p.city, nameKey, rioMatch.rows[0]?.id || null]
+        ) : { rows: [] };
+        if (shopMatch.rows[0]) {
+          throw Object.assign(new Error(`Row ${p.rowNumber}: ${p.name} already exists in ${p.city} with RIO ID ${shopMatch.rows[0].rio_id || "not set"}. Use that RIO ID or edit the existing shop.`), { status: 409 });
+        }
+        if (rioMatch.rows[0]) {
+          await client.query(
+            `UPDATE pharmacies SET name=$1,name_key=$2,party_alt_code=$3,address=$4,state=$5,city=$6,active=TRUE
+             WHERE id=$7`,
+            [p.name,nameKey,p.partyAltCode,p.address||null,p.state||null,p.city||null,rioMatch.rows[0].id]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO pharmacies (name,name_key,rio_id,party_alt_code,address,state,city,area,created_by,active)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,TRUE)`,
+            [p.name,nameKey,p.rioId,p.partyAltCode,p.address||null,p.state||null,p.city||null,req.user.id]
+          );
+        }
       }
       return items.length;
     });
@@ -521,6 +543,7 @@ router.post("/master-pharmacies/import", requireRole("admin", "regional_head"), 
     res.json({ imported });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
+    if (err.code === "23505") return res.status(409).json({ error: "The upload contains a duplicate RIO ID or a pharmacy that already exists in the same city. No rows were imported." });
     next(err);
   }
 });
