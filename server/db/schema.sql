@@ -49,6 +49,29 @@ ALTER TABLE pharmacies ALTER COLUMN state DROP NOT NULL;
 ALTER TABLE pharmacies ALTER COLUMN city DROP NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS pharmacies_rio_id_key ON pharmacies (rio_id) WHERE rio_id IS NOT NULL;
 
+-- A retailer (RIO ID) can be serviced by multiple distributors. Each
+-- distributor can therefore use a different Party/Alt Code for the same shop.
+CREATE TABLE IF NOT EXISTS pharmacy_party_codes (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  pharmacy_id    UUID NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  party_alt_code TEXT NOT NULL,
+  created_by     UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  active         BOOLEAN NOT NULL DEFAULT TRUE,
+  UNIQUE (pharmacy_id, party_alt_code)
+);
+CREATE INDEX IF NOT EXISTS pharmacy_party_codes_lookup_idx
+  ON pharmacy_party_codes (lower(trim(party_alt_code)));
+
+-- Backfill the mapping table for databases created before multi-distributor
+-- party codes were introduced. The legacy column remains as the primary code
+-- for backwards-compatible API clients.
+INSERT INTO pharmacy_party_codes (pharmacy_id, party_alt_code, created_by)
+SELECT id, trim(party_alt_code), created_by
+FROM pharmacies
+WHERE NULLIF(trim(party_alt_code), '') IS NOT NULL
+ON CONFLICT (pharmacy_id, party_alt_code) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS planned_targets (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   state         TEXT NOT NULL,

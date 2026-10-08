@@ -215,12 +215,15 @@ router.get("/pharmacies", async (req, res, next) => {
     const search = String(req.query.search || "").trim().toLowerCase();
     const city = req.query.city || null;
     const { rows } = await query(
-      `SELECT id, name, rio_id, party_alt_code, address, state, city, area, latitude, longitude
-       FROM pharmacies
-       WHERE active = TRUE
-         AND ($1::text IS NULL OR city = $1)
-         AND ($2::text = '' OR lower(name) LIKE '%' || $2 || '%')
-       ORDER BY name LIMIT 50`,
+      `SELECT p.id, p.name, p.rio_id, p.party_alt_code, p.address, p.state, p.city, p.area, p.latitude, p.longitude,
+              COALESCE((SELECT array_agg(ppc.party_alt_code ORDER BY ppc.party_alt_code)
+                        FROM pharmacy_party_codes ppc
+                        WHERE ppc.pharmacy_id=p.id AND ppc.active=TRUE), ARRAY[]::text[]) AS party_alt_codes
+       FROM pharmacies p
+       WHERE p.active = TRUE
+         AND ($1::text IS NULL OR p.city = $1)
+         AND ($2::text = '' OR lower(p.name) LIKE '%' || $2 || '%' OR lower(COALESCE(p.rio_id,'')) LIKE '%' || $2 || '%' OR EXISTS (SELECT 1 FROM pharmacy_party_codes ppc WHERE ppc.pharmacy_id=p.id AND ppc.active=TRUE AND lower(ppc.party_alt_code) LIKE '%' || $2 || '%'))
+       ORDER BY p.name LIMIT 50`,
       [city, search]
     );
     res.json({ pharmacies: rows });
@@ -236,15 +239,24 @@ router.post("/pharmacies", requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: "Pharmacy Name, RIO ID and Party/Alt Code are required." });
     }
     const nameKey = String(b.name).trim().toLowerCase().replace(/\s+/g, " ");
-    const { rows } = await query(
-      `INSERT INTO pharmacies (name, name_key, rio_id, party_alt_code, address, state, city, area, latitude, longitude, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,$9,$10)
-       ON CONFLICT (rio_id) WHERE rio_id IS NOT NULL DO UPDATE SET name=EXCLUDED.name,name_key=EXCLUDED.name_key,
-         party_alt_code=EXCLUDED.party_alt_code,address=EXCLUDED.address,state=EXCLUDED.state,city=EXCLUDED.city
-       RETURNING *`,
-      [b.name.trim(), nameKey, String(b.rioId).trim().toUpperCase(), String(b.partyAltCode).trim(),
-       b.address || null, b.state || null, b.city || null, b.latitude || null, b.longitude || null, req.user.id]
-    );
+    const { rows } = await withTransaction(async (client) => {
+      const saved = await client.query(
+        `INSERT INTO pharmacies (name, name_key, rio_id, party_alt_code, address, state, city, area, latitude, longitude, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,$9,$10)
+         ON CONFLICT (rio_id) WHERE rio_id IS NOT NULL DO UPDATE SET name=EXCLUDED.name,name_key=EXCLUDED.name_key,
+           party_alt_code=EXCLUDED.party_alt_code,address=EXCLUDED.address,state=EXCLUDED.state,city=EXCLUDED.city
+         RETURNING *`,
+        [b.name.trim(), nameKey, String(b.rioId).trim().toUpperCase(), String(b.partyAltCode).trim(),
+         b.address || null, b.state || null, b.city || null, b.latitude || null, b.longitude || null, req.user.id]
+      );
+      await client.query(
+        `INSERT INTO pharmacy_party_codes (pharmacy_id,party_alt_code,created_by,active)
+         VALUES ($1,$2,$3,TRUE)
+         ON CONFLICT (pharmacy_id,party_alt_code) DO UPDATE SET active=TRUE`,
+        [saved.rows[0].id, String(b.partyAltCode).trim(), req.user.id]
+      );
+      return saved;
+    });
     res.status(201).json({ pharmacy: rows[0] });
   } catch (err) {
     next(err);

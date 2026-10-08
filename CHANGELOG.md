@@ -3,6 +3,14 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.4.0 — 8 October 2026
+
+- Support multiple distributor Party/Alt Codes for one pharmacy/RIO ID.
+- Import large Regional Head master files using two bulk database operations.
+- Keep one pharmacy record per RIO while preserving every distinct distributor code.
+- Search and display all Party/Alt Codes associated with a pharmacy.
+- Remove the incorrect duplicate-RIO rejection from CSV preflight validation.
+
 ## v1.3.0 — 7 October 2026
 
 - Show the Regional Head's total active master-list stores on Overview.

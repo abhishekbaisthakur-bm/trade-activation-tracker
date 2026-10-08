@@ -11,6 +11,42 @@ const roleLabel = (role) => ({ regional_head:"Regional Head", city_head:"City He
 const childRoles = { regional_head:["city_head","team_lead","field"], city_head:["team_lead","field"], team_lead:["field"] };
 const parentRoles = { city_head:["regional_head"], team_lead:["regional_head","city_head"], field:["regional_head","city_head","team_lead"] };
 
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [], current = "", quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (quoted) {
+      if (char === '"' && text[i + 1] === '"') { current += '"'; i += 1; }
+      else if (char === '"') quoted = false;
+      else current += char;
+    } else if (char === '"') quoted = true;
+    else if (char === ",") { row.push(current); current = ""; }
+    else if (char === "\n") { row.push(current); rows.push(row); row = []; current = ""; }
+    else if (char !== "\r") current += char;
+  }
+  row.push(current); rows.push(row);
+  return rows.filter((values) => values.some((value) => String(value).trim()));
+}
+
+async function validateMasterCsv(file) {
+  if (file.size > 5 * 1024 * 1024) throw new Error("The CSV file must be under 5 MB.");
+  const rows = parseCsvRows((await file.text()).replace(/^\uFEFF/, ""));
+  if (rows.length < 2) throw new Error("The file has no data rows.");
+  const headers = rows[0].map((value) => String(value).trim().toLowerCase());
+  const required = ["pharmacy name", "rio id", "party/alt code"];
+  const missing = required.filter((name) => !headers.includes(name));
+  if (missing.length) throw new Error(`Missing column(s): ${missing.join(", ")}.`);
+  const indexes = Object.fromEntries(required.map((name) => [name, headers.indexOf(name)]));
+  for (let index = 1; index < rows.length; index += 1) {
+    const rowNumber = index + 1;
+    const name = String(rows[index][indexes["pharmacy name"]] || "").trim();
+    const rioId = String(rows[index][indexes["rio id"]] || "").trim().toUpperCase();
+    const partyCode = String(rows[index][indexes["party/alt code"]] || "").trim();
+    if (!name || !rioId || !partyCode) throw new Error(`Row ${rowNumber}: Pharmacy Name, RIO ID and Party/Alt Code are required.`);
+  }
+}
+
 function PageControls({ pagination, onPage }) {
   if (!pagination?.total) return null;
   const from = (pagination.page - 1) * pagination.pageSize + 1;
@@ -82,7 +118,7 @@ function ReadOnlyMasterList() {
       <div className="overflow-x-auto"><table className="w-full text-sm">
         <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">Pharmacy</th><th className="px-3 py-2">Geography</th><th className="px-3 py-2">Status</th></tr></thead>
         <tbody className="divide-y divide-slate-100">{shops.map((shop)=><tr key={shop.id}>
-          <td className="max-w-xl px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_code||"—"}</p><p className="truncate text-xs text-slate-500" title={shop.address||""}>{shop.address||"—"}</p></td>
+          <td className="max-w-xl px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_codes?.join(", ")||shop.party_alt_code||"—"}</p><p className="truncate text-xs text-slate-500" title={shop.address||""}>{shop.address||"—"}</p></td>
           <td className="px-3 py-2">{[shop.city,shop.state].filter(Boolean).join(", ")||"—"}</td><td className="px-3 py-2">{shop.active?"Active":"Inactive"}</td>
         </tr>)}{!shops.length?<tr><td colSpan="3" className="px-4 py-8 text-center text-slate-400">No master shops found for your location.</td></tr>:null}</tbody>
       </table></div><PageControls pagination={pagination} onPage={setPage}/>
@@ -157,7 +193,7 @@ function MasterDataReviews({ canManage }) {
   };
   const importCsv = async (file) => {
     setBusy("import"); setError("");
-    try { await api.importMasterPharmacies(file); await load(); }
+    try { await validateMasterCsv(file); await api.importMasterPharmacies(file); await load(); }
     catch (e) { setError(e.message); }
     finally { setBusy(""); }
   };
@@ -241,7 +277,7 @@ function MasterDataReviews({ canManage }) {
             <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">Shop</th><th className="px-3 py-2">Geography</th><th className="px-3 py-2">Status</th>{canManage?<th className="px-3 py-2">Actions</th>:null}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {shops.map((shop)=><tr key={shop.id}>
-                <td className="max-w-xl px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_code||"—"}</p><p className="truncate text-xs text-slate-500" title={shop.address||""}>{shop.address||"—"}</p></td>
+                <td className="max-w-xl px-3 py-2"><p className="font-medium">{shop.name}</p><p className="text-xs text-slate-500">RIO: {shop.rio_id||"—"} · Party/Alt: {shop.party_alt_codes?.join(", ")||shop.party_alt_code||"—"}</p><p className="truncate text-xs text-slate-500" title={shop.address||""}>{shop.address||"—"}</p></td>
                 <td className="whitespace-nowrap px-3 py-2">{[shop.city,shop.state].filter(Boolean).join(", ")||"—"}</td>
                 <td className="whitespace-nowrap px-3 py-2">{shop.active ? "Active" : "Inactive"}</td>
                 {canManage?<td className="px-3 py-2"><div className="flex flex-wrap gap-2">

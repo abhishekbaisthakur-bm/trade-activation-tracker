@@ -378,7 +378,7 @@ router.get("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, 
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const pageSize = Math.min(100, Math.max(10, parseInt(req.query.pageSize, 10) || 10));
     const params = [search];
-    let where = "WHERE ($1::text = '' OR lower(p.name) LIKE '%' || $1 || '%' OR lower(COALESCE(p.rio_id,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.party_alt_code,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.city,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.area,'')) LIKE '%' || $1 || '%')";
+    let where = "WHERE ($1::text = '' OR lower(p.name) LIKE '%' || $1 || '%' OR lower(COALESCE(p.rio_id,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.party_alt_code,'')) LIKE '%' || $1 || '%' OR EXISTS (SELECT 1 FROM pharmacy_party_codes ppc WHERE ppc.pharmacy_id=p.id AND ppc.active=TRUE AND lower(ppc.party_alt_code) LIKE '%' || $1 || '%') OR lower(COALESCE(p.city,'')) LIKE '%' || $1 || '%' OR lower(COALESCE(p.area,'')) LIKE '%' || $1 || '%')";
     if (req.user.assigned_state) {
       params.push(req.user.assigned_state);
       where += ` AND regexp_replace(lower(COALESCE(p.state,'')), '\\s+', '', 'g') = regexp_replace(lower($${params.length}), '\\s+', '', 'g')`;
@@ -390,7 +390,11 @@ router.get("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, 
     const count = await query(`SELECT COUNT(*)::int AS total FROM pharmacies p ${where}`, params);
     params.push(pageSize, (page - 1) * pageSize);
     const { rows } = await query(
-      `SELECT p.* FROM pharmacies p ${where} ORDER BY p.active DESC, p.name, p.rio_id
+      `SELECT p.*,
+              COALESCE((SELECT array_agg(ppc.party_alt_code ORDER BY ppc.party_alt_code)
+                        FROM pharmacy_party_codes ppc
+                        WHERE ppc.pharmacy_id=p.id AND ppc.active=TRUE), ARRAY[]::text[]) AS party_alt_codes
+       FROM pharmacies p ${where} ORDER BY p.active DESC, p.name, p.rio_id
        LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
@@ -416,6 +420,12 @@ router.post("/master-pharmacies", requireRole("admin", "regional_head"), async (
          RETURNING *`,
         [String(p.name).trim(), nameKey, String(p.rioId).trim().toUpperCase(), String(p.partyAltCode).trim(),
          p.address || null, p.state || null, p.city || null, p.latitude ?? null, p.longitude ?? null, req.user.id]
+      );
+      await client.query(
+        `INSERT INTO pharmacy_party_codes (pharmacy_id,party_alt_code,created_by,active)
+         VALUES ($1,$2,$3,TRUE)
+         ON CONFLICT (pharmacy_id,party_alt_code) DO UPDATE SET active=TRUE`,
+        [rows[0].id, String(p.partyAltCode).trim(), req.user.id]
       );
       return rows[0];
     });
@@ -445,6 +455,12 @@ router.patch("/master-pharmacies/:id", requireRole("admin", "regional_head"), as
            latitude=$8,longitude=$9,active=$10 WHERE id=$11 RETURNING *`,
         [String(p.name).trim(), nameKey, String(rioId).trim().toUpperCase(), String(partyAltCode).trim(), p.address || null,
          p.state || null, p.city || null, p.latitude ?? null, p.longitude ?? null, p.active !== false, req.params.id]
+      );
+      await client.query(
+        `INSERT INTO pharmacy_party_codes (pharmacy_id,party_alt_code,created_by,active)
+         VALUES ($1,$2,$3,TRUE)
+         ON CONFLICT (pharmacy_id,party_alt_code) DO UPDATE SET active=TRUE`,
+        [rows[0].id, String(partyAltCode).trim(), req.user.id]
       );
       return rows[0];
     });
@@ -514,37 +530,60 @@ router.post("/master-pharmacies/import", requireRole("admin", "regional_head"), 
     }));
     const invalid = items.find((p) => !p.name || !p.rioId || !p.partyAltCode);
     if (invalid) return res.status(400).json({ error: `Row ${invalid.rowNumber}: Pharmacy Name, RIO ID and Party/Alt Code are required.` });
-    const seenRioIds = new Map();
-    const duplicateRio = items.find((p) => {
-      const firstRow = seenRioIds.get(p.rioId);
-      if (firstRow) { p.duplicateOfRow = firstRow; return true; }
-      seenRioIds.set(p.rioId, p.rowNumber);
-      return false;
-    });
-    if (duplicateRio) return res.status(400).json({ error: `Row ${duplicateRio.rowNumber}: RIO ID ${duplicateRio.rioId} is already used on row ${duplicateRio.duplicateOfRow}.` });
     items.forEach((p) => assertManagerTerritory(req.user, p));
+    // Import the complete validated file in one database statement. The old
+    // row-by-row loop made two network round trips per shop and could exceed
+    // the hosting request window for Regional Head files with several thousand
+    // rows, surfacing in the browser as a misleading connection error.
+    // One RIO is one retailer, but that retailer may have several distributor
+    // Party/Alt Codes. Keep the first shop description and import every unique
+    // RIO + Party/Alt Code relationship.
+    const shopsByRio = new Map();
+    const codePairs = new Map();
+    for (const p of items) {
+      if (!shopsByRio.has(p.rioId)) shopsByRio.set(p.rioId, {
+        name: p.name,
+        name_key: p.name.toLowerCase().replace(/\s+/g, " "),
+        rio_id: p.rioId,
+        party_alt_code: p.partyAltCode,
+        address: p.address || null,
+        state: p.state || null,
+        city: p.city || null,
+      });
+      codePairs.set(`${p.rioId}\u0000${p.partyAltCode}`, { rio_id: p.rioId, party_alt_code: p.partyAltCode });
+    }
+    const shopPayload = [...shopsByRio.values()];
+    const codePayload = [...codePairs.values()];
     const imported = await withTransaction(async (client) => {
-      for (const p of items) {
-        const nameKey = p.name.toLowerCase().replace(/\s+/g, " ");
-        const rioMatch = await client.query("SELECT id FROM pharmacies WHERE rio_id=$1", [p.rioId]);
-        if (rioMatch.rows[0]) {
-          await client.query(
-            `UPDATE pharmacies SET name=$1,name_key=$2,party_alt_code=$3,address=$4,state=$5,city=$6,active=TRUE
-             WHERE id=$7`,
-            [p.name,nameKey,p.partyAltCode,p.address||null,p.state||null,p.city||null,rioMatch.rows[0].id]
-          );
-        } else {
-          await client.query(
-            `INSERT INTO pharmacies (name,name_key,rio_id,party_alt_code,address,state,city,area,created_by,active)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,TRUE)`,
-            [p.name,nameKey,p.rioId,p.partyAltCode,p.address||null,p.state||null,p.city||null,req.user.id]
-          );
-        }
-      }
-      return items.length;
+      await client.query(
+        `INSERT INTO pharmacies
+           (name,name_key,rio_id,party_alt_code,address,state,city,area,created_by,active)
+         SELECT x.name,x.name_key,x.rio_id,x.party_alt_code,x.address,x.state,x.city,NULL,$2,TRUE
+         FROM jsonb_to_recordset($1::jsonb) AS x(
+           name text,name_key text,rio_id text,party_alt_code text,address text,state text,city text
+         )
+         ON CONFLICT (rio_id) WHERE rio_id IS NOT NULL DO UPDATE SET
+           name=EXCLUDED.name,
+           name_key=EXCLUDED.name_key,
+           party_alt_code=EXCLUDED.party_alt_code,
+           address=EXCLUDED.address,
+           state=EXCLUDED.state,
+           city=EXCLUDED.city,
+           active=TRUE`,
+        [JSON.stringify(shopPayload), req.user.id]
+      );
+      const codeResult = await client.query(
+        `INSERT INTO pharmacy_party_codes (pharmacy_id,party_alt_code,created_by,active)
+         SELECT p.id,x.party_alt_code,$2,TRUE
+         FROM jsonb_to_recordset($1::jsonb) AS x(rio_id text,party_alt_code text)
+         JOIN pharmacies p ON p.rio_id=x.rio_id
+         ON CONFLICT (pharmacy_id,party_alt_code) DO UPDATE SET active=TRUE`,
+        [JSON.stringify(codePayload), req.user.id]
+      );
+      return { rows: items.length, shops: shopPayload.length, partyCodes: codeResult.rowCount };
     });
-    await audit(req.user.id, "master_pharmacy.imported", "pharmacy", null, { rows: imported });
-    res.json({ imported });
+    await audit(req.user.id, "master_pharmacy.imported", "pharmacy", null, imported);
+    res.json({ imported: imported.rows, shops: imported.shops, partyCodes: imported.partyCodes });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     if (err.code === "23505") return res.status(409).json({ error: "The upload contains a RIO ID that is already assigned to another pharmacy. No rows were imported." });

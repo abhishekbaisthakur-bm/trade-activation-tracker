@@ -63,7 +63,11 @@ test("Regional Head master CSV import uses RIO ID and permits repeated names", {
   assert.equal(repeatedName.status, 200, await repeatedName.text());
   assert.equal((await db.query("SELECT count(*)::int AS count FROM pharmacies WHERE name_key='existing shop' AND city='Mumbai'")).rows[0].count, 2);
 
-  const duplicate = await upload("Pharmacy Name,Rio Id,Party/Alt Code\nOne,RIO-DUP,ALT-1\nTwo,RIO-DUP,ALT-2\n");
-  assert.equal(duplicate.status, 400);
-  assert.match((await duplicate.json()).error, /already used on row 2/);
+  const multiDistributor = await upload("Pharmacy Name,Rio Id,Party/Alt Code\nOne,RIO-DUP,ALT-1\nOne,RIO-DUP,ALT-2\nOne,RIO-DUP,ALT-2\n");
+  assert.equal(multiDistributor.status, 200, await multiDistributor.text());
+  const multiResult = await multiDistributor.json();
+  assert.equal(multiResult.imported, 3);
+  assert.equal(multiResult.shops, 1);
+  assert.equal((await db.query("SELECT count(*)::int AS count FROM pharmacies WHERE rio_id='RIO-DUP'")).rows[0].count, 1);
+  assert.equal((await db.query("SELECT count(*)::int AS count FROM pharmacy_party_codes ppc JOIN pharmacies p ON p.id=ppc.pharmacy_id WHERE p.rio_id='RIO-DUP'")).rows[0].count, 2);
 });
