@@ -206,6 +206,7 @@ router.get("/", async (req, res, next) => {
     const { clause, params } = buildFilters(req.query, {
       forceUser: isAdmin || leader ? null : req.user.id,
       ancestorId: leader ? req.user.id : null,
+      regionScope: req.user.role === "regional_head" ? req.user.region : null,
     });
     const limit = Math.min(200, parseInt(req.query.limit, 10) || 50);
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
@@ -271,10 +272,17 @@ router.get("/:id", async (req, res, next) => {
     if (!activation) return res.status(404).json({ error: "Activation not found." });
     let canView = req.user.role === "admin" || activation.user_id === req.user.id;
     if (!canView && isLeader(req.user.role)) {
-      const member = await query(
-        `SELECT 1 FROM users u WHERE id = $1 AND role = 'field' AND ${descendantSql("$2", "u")}`,
-        [activation.user_id, req.user.id]
-      );
+      const member = req.user.role === "regional_head"
+        ? await query(
+          `SELECT 1 FROM users u WHERE id=$1 AND role='field'
+           AND regexp_replace(lower(COALESCE(u.region, '')), '\\s+', '', 'g') =
+               regexp_replace(lower($2), '\\s+', '', 'g')`,
+          [activation.user_id, req.user.region || ""]
+        )
+        : await query(
+          `SELECT 1 FROM users u WHERE id = $1 AND role = 'field' AND ${descendantSql("$2", "u")}`,
+          [activation.user_id, req.user.id]
+        );
       canView = member.rows.length > 0;
     }
     if (!canView) {
@@ -315,8 +323,12 @@ router.get("/:id/photo/:asset", async (req, res, next) => {
       req.user.role === "admin" ||
       photo.user_id === req.user.id ||
       (isLeader(req.user.role) && (await query(
-        `SELECT 1 FROM users u WHERE u.id = $1 AND ${descendantSql("$2", "u")}`,
-        [photo.user_id, req.user.id]
+        req.user.role === "regional_head"
+          ? `SELECT 1 FROM users u WHERE u.id=$1
+             AND regexp_replace(lower(COALESCE(u.region, '')), '\\s+', '', 'g') =
+                 regexp_replace(lower($2), '\\s+', '', 'g')`
+          : `SELECT 1 FROM users u WHERE u.id = $1 AND ${descendantSql("$2", "u")}`,
+        [photo.user_id, req.user.role === "regional_head" ? (req.user.region || "") : req.user.id]
       )).rows.length > 0);
 
     if (!canView) {

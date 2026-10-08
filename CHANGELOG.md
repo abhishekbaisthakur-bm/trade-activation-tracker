@@ -3,6 +3,14 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.5.0 — 8 October 2026
+
+- Share pharmacy targets and activation reporting between Regional Heads with the same Region.
+- Keep each Regional Head's user-management hierarchy separate.
+- Apply shared-region scope to performance totals, activation access, photos and Excel exports.
+- Assign every Regional Head to the ADMIN001 reporting root.
+- Normalize region matching for capitalization and extra spaces.
+
 ## v1.4.1 — 8 October 2026
 
 - Count each unique RIO ID + Party/Alt Code as a target-store assignment.

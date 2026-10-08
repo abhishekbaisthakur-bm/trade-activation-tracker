@@ -32,7 +32,9 @@ function buildFilters(q, opts = {}) {
     );
   }
   if (opts.forceUser) add("a.user_id = ?", opts.forceUser);
-  if (opts.ancestorId) {
+  if (opts.regionScope) {
+    add("regexp_replace(lower(COALESCE(u.region, '')), '\\s+', '', 'g') = regexp_replace(lower(?), '\\s+', '', 'g')", opts.regionScope);
+  } else if (opts.ancestorId) {
     params.push(opts.ancestorId);
     where.push(descendantSql(`$${params.length}`, "u"));
   }
@@ -51,7 +53,17 @@ function buildPlanFilters(q, startIndex = 0, opts = {}) {
   if (q.state) add("p.state", q.state);
   if (q.city) add("p.city", q.city);
   if (q.area) add("p.area", q.area);
-  if (opts.ancestorId) {
+  if (opts.regionScope) {
+    params.push(opts.regionScope);
+    where.push(`EXISTS (
+      SELECT 1 FROM users plan_user
+      WHERE plan_user.role = 'field'
+        AND plan_user.assigned_state = p.state
+        AND plan_user.assigned_city = p.city
+        AND regexp_replace(lower(COALESCE(plan_user.region, '')), '\\s+', '', 'g') =
+            regexp_replace(lower($${startIndex + params.length}), '\\s+', '', 'g')
+    )`);
+  } else if (opts.ancestorId) {
     params.push(opts.ancestorId);
     where.push(`EXISTS (
       SELECT 1 FROM users plan_user

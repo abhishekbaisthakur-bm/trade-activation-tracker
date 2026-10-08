@@ -22,7 +22,8 @@ async function resolveHierarchy(role, values) {
   if (role === "regional_head") {
     const region = String(values.region || "").trim();
     if (!region) throw Object.assign(new Error("Region is required for a Regional Head."), { status: 400 });
-    return { region, state: null, city: null, managerId: null };
+    const master = await query("SELECT id FROM users WHERE employee_id=$1 AND role='admin' AND active=TRUE LIMIT 1", [MASTER_ADMIN_EMPLOYEE_ID]);
+    return { region, state: null, city: null, managerId: master.rows[0]?.id || null };
   }
   const state = String(values.state || "").trim();
   const city = String(values.city || "").trim();

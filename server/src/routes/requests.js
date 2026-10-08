@@ -387,6 +387,15 @@ router.get("/master-pharmacies", requireRole(...LEADER_ROLES), async (req, res, 
       params.push(req.user.assigned_city);
       where += ` AND lower(trim(COALESCE(p.city,''))) = lower(trim($${params.length}))`;
     }
+    if (req.user.role === "regional_head") {
+      params.push(req.user.region || "");
+      where += ` AND EXISTS (
+        SELECT 1 FROM users creator
+        WHERE creator.id=p.created_by
+          AND regexp_replace(lower(COALESCE(creator.region,'')), '\\s+', '', 'g') =
+              regexp_replace(lower($${params.length}), '\\s+', '', 'g')
+      )`;
+    }
     const count = await query(`SELECT COUNT(*)::int AS total FROM pharmacies p ${where}`, params);
     params.push(pageSize, (page - 1) * pageSize);
     const { rows } = await query(

@@ -192,6 +192,17 @@ SET region = COALESCE(child.region, parent.region, parent.assigned_state)
 FROM users parent
 WHERE child.manager_id = parent.id AND child.region IS NULL;
 
+-- Regional Heads are peers under the master admin. Region controls shared
+-- reporting data; manager_id continues to control who can manage each team.
+UPDATE users regional_head
+SET manager_id = master_admin.id,
+    updated_at = now()
+FROM users master_admin
+WHERE regional_head.role = 'regional_head'
+  AND master_admin.employee_id = 'ADMIN001'
+  AND master_admin.role = 'admin'
+  AND regional_head.manager_id IS DISTINCT FROM master_admin.id;
+
 CREATE TABLE IF NOT EXISTS approval_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   type TEXT NOT NULL CHECK (type IN ('user_create','user_deactivate','target_change')),

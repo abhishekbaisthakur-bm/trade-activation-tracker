@@ -23,11 +23,12 @@ function buildMasterPlanFilters(q, opts = {}) {
   if (q.area) add("lower(trim(COALESCE(ph.area, 'Not specified'))) = lower(trim(?))", q.area);
   const leader = opts.leader;
   if (leader?.role === "regional_head") {
-    params.push(leader.id);
+    params.push(leader.region || "");
     where.push(`EXISTS (
       SELECT 1 FROM users creator
       WHERE creator.id = ph.created_by
-        AND ${descendantOrSelfSql(`$${params.length}`, "creator")}
+        AND regexp_replace(lower(COALESCE(creator.region, '')), '\\s+', '', 'g') =
+            regexp_replace(lower($${params.length}), '\\s+', '', 'g')
     )`);
   } else if (leader) {
     if (leader.assigned_state) add("regexp_replace(lower(COALESCE(ph.state, '')), '\\s+', '', 'g') = regexp_replace(lower(?), '\\s+', '', 'g')", leader.assigned_state);
@@ -191,7 +192,9 @@ async function summary(q, opts = {}) {
      LEFT JOIN activation_assets aa ON aa.activation_id = a.id
        ${q.asset ? "AND aa.asset_type = $" + (params.length + 1) : ""}
      WHERE u.role = 'field'
-       ${opts.ancestorId ? `AND ${descendantSql(`$${params.length}`, "u")}` : ""}
+       ${opts.regionScope
+         ? `AND regexp_replace(lower(COALESCE(u.region, '')), '\\s+', '', 'g') = regexp_replace(lower($${params.length}), '\\s+', '', 'g')`
+         : opts.ancestorId ? `AND ${descendantSql(`$${params.length}`, "u")}` : ""}
      GROUP BY u.id ORDER BY shops DESC`,
     q.asset ? [...params, q.asset] : params
   );
@@ -292,21 +295,24 @@ async function summary(q, opts = {}) {
 }
 
 // Manager dashboard: only salespeople assigned to the logged-in manager.
+const managerScope = (user) => ({
+  ancestorId: user.id,
+  leader: user,
+  regionScope: user.role === "regional_head" ? user.region : null,
+});
+
 router.get("/manager/team", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
-    const data = await summary({}, { ancestorId: req.user.id, leader: req.user });
+    const data = await summary({}, managerScope(req.user));
     const members = data.byPeople.filter((person) => person.id !== req.user.id);
     const salesmen = members.filter((person) => person.role === "field");
-    const totalStoresActivated = salesmen.reduce((sum, person) => sum + person.shops, 0);
-    const totalActivations = salesmen.reduce((sum, person) => sum + person.activations, 0);
-
     res.json({
       totals: {
         members: members.length,
         salesmen: salesmen.length,
         plannedShops: data.totals.plannedShops,
-        storesActivated: totalStoresActivated,
-        activations: totalActivations
+        storesActivated: data.totals.activatedShops,
+        activations: data.totals.activations
       },
       members,
       salesmen: salesmen.map((person) => ({
@@ -395,7 +401,7 @@ router.get("/manager/team/:userId/activations", requireRole(...LEADER_ROLES), as
 router.get("/manager/summary", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
     const scoped = { ...req.query };
-    const data = await summary(scoped, { ancestorId: req.user.id, leader: req.user });
+    const data = await summary(scoped, managerScope(req.user));
     res.json(data);
   } catch (err) {
     next(err);
@@ -413,7 +419,7 @@ router.get("/summary", requireAdmin, async (req, res, next) => {
 router.get("/export/performance.xlsx", requireRole("admin", ...LEADER_ROLES), async (req, res, next) => {
   try {
     const leader = LEADER_ROLES.includes(req.user.role);
-    const opts = leader ? { ancestorId: req.user.id, leader: req.user } : {};
+    const opts = leader ? managerScope(req.user) : {};
     const data = await summary(req.query, opts);
     const { clause, params } = buildFilters(req.query, opts);
     const records = await query(
