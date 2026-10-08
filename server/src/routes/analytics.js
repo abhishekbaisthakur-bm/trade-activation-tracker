@@ -94,8 +94,9 @@ async function summary(q, opts = {}) {
               ${masterExpr(col)} AS key,
               MIN(${masterExpr("state")}) AS state,
               MIN(${masterExpr("city")}) AS city,
-              COUNT(DISTINCT ph.id)::int AS planned_shops
+              COUNT(DISTINCT ppc.id)::int AS planned_shops
        FROM pharmacies ph
+       JOIN pharmacy_party_codes ppc ON ppc.pharmacy_id = ph.id AND ppc.active = TRUE
        ${masterPlan.clause}
        GROUP BY ${masterGroups.join(", ")}`,
       masterPlan.params
@@ -259,7 +260,10 @@ async function summary(q, opts = {}) {
     params
   );
   const totalsPlan = await query(
-    `SELECT COUNT(DISTINCT ph.id)::int AS shops FROM pharmacies ph ${masterPlan.clause}`,
+    `SELECT COUNT(DISTINCT ppc.id)::int AS shops
+     FROM pharmacies ph
+     JOIN pharmacy_party_codes ppc ON ppc.pharmacy_id = ph.id AND ppc.active = TRUE
+     ${masterPlan.clause}`,
     masterPlan.params
   );
 

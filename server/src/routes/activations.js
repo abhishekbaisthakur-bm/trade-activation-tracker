@@ -105,10 +105,14 @@ router.post("/", requireRole("field"), upload.any(), async (req, res, next) => {
         // geography stay on the activation and wait for manager verification.
         const nameKey = String(payload.pharmacyName).trim().toLowerCase().replace(/\s+/g, " ");
         const ph = await client.query(
-          `SELECT id FROM pharmacies
-           WHERE city = $1 AND name_key = $2 AND state = $3 AND area IS NOT DISTINCT FROM $4 AND active = TRUE
+          `SELECT p.id FROM pharmacies p
+           JOIN pharmacy_party_codes ppc ON ppc.pharmacy_id=p.id AND ppc.active=TRUE
+           WHERE p.active = TRUE
+             AND (($5::uuid IS NOT NULL AND p.id=$5) OR
+                  ($5::uuid IS NULL AND p.city=$1 AND p.name_key=$2 AND p.state=$3 AND p.area IS NOT DISTINCT FROM $4))
+             AND lower(trim(ppc.party_alt_code))=lower(trim($6))
            LIMIT 1`,
-          [payload.city, nameKey, payload.state, payload.area || null]
+          [payload.city, nameKey, payload.state, payload.area || null, payload.pharmacyId || null, partyCode]
         );
 
         const seq = await client.query(

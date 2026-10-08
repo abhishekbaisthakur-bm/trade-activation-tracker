@@ -215,15 +215,14 @@ router.get("/pharmacies", async (req, res, next) => {
     const search = String(req.query.search || "").trim().toLowerCase();
     const city = req.query.city || null;
     const { rows } = await query(
-      `SELECT p.id, p.name, p.rio_id, p.party_alt_code, p.address, p.state, p.city, p.area, p.latitude, p.longitude,
-              COALESCE((SELECT array_agg(ppc.party_alt_code ORDER BY ppc.party_alt_code)
-                        FROM pharmacy_party_codes ppc
-                        WHERE ppc.pharmacy_id=p.id AND ppc.active=TRUE), ARRAY[]::text[]) AS party_alt_codes
+      `SELECT p.id, p.name, p.rio_id, ppc.party_alt_code, p.address, p.state, p.city, p.area, p.latitude, p.longitude,
+              ppc.id AS party_code_id
        FROM pharmacies p
+       JOIN pharmacy_party_codes ppc ON ppc.pharmacy_id=p.id AND ppc.active=TRUE
        WHERE p.active = TRUE
          AND ($1::text IS NULL OR p.city = $1)
-         AND ($2::text = '' OR lower(p.name) LIKE '%' || $2 || '%' OR lower(COALESCE(p.rio_id,'')) LIKE '%' || $2 || '%' OR EXISTS (SELECT 1 FROM pharmacy_party_codes ppc WHERE ppc.pharmacy_id=p.id AND ppc.active=TRUE AND lower(ppc.party_alt_code) LIKE '%' || $2 || '%'))
-       ORDER BY p.name LIMIT 50`,
+         AND ($2::text = '' OR lower(p.name) LIKE '%' || $2 || '%' OR lower(COALESCE(p.rio_id,'')) LIKE '%' || $2 || '%' OR lower(ppc.party_alt_code) LIKE '%' || $2 || '%')
+       ORDER BY p.name, ppc.party_alt_code LIMIT 50`,
       [city, search]
     );
     res.json({ pharmacies: rows });

@@ -3,6 +3,13 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.4.1 — 8 October 2026
+
+- Count each unique RIO ID + Party/Alt Code as a target-store assignment.
+- Show distributor-specific pharmacy options to salesmen during activation.
+- Link an activation only when both its pharmacy and Party/Alt Code match.
+- Keep exact duplicate RIO + Party/Alt Code rows consolidated.
+
 ## v1.4.0 — 8 October 2026
 
 - Support multiple distributor Party/Alt Codes for one pharmacy/RIO ID.

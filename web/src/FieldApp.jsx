@@ -180,13 +180,13 @@ function NewActivation({ user, geo, onSubmitted }) {
             {suggestions.length ? (
               <div className="-mt-2 space-y-1">
                 {suggestions.map((p) => (
-                  <button key={p.id}
+                  <button key={p.party_code_id || `${p.id}:${p.party_alt_code}`}
                     onClick={() => { setForm((f) => ({ ...f, pharmacyName: p.name, partyCode: p.party_alt_code || f.partyCode, address: p.address || "", area: p.area || "", pharmacyId: p.id })); setSuggestions([]); }}
                     className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-teal-50">
                     <Store size={14} className="text-slate-400" />
                     <span className="truncate">
                       <span className="font-medium text-slate-800">{p.name}</span>
-                      <span className="text-slate-500"> - {p.area || "Area not specified"}</span>
+                      <span className="text-slate-500"> · {p.party_alt_code} · {p.area || "Area not specified"}</span>
                     </span>
                   </button>
                 ))}
