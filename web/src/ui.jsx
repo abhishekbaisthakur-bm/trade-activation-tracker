@@ -615,7 +615,13 @@ export function AdminAnalytics({ a }) {
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-700">
               {open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
             </button> : <span className="h-7 w-7 shrink-0" />}
-            <span className="min-w-0"><span className="block truncate font-medium text-slate-900">{person.name}</span><span className="block text-xs text-slate-500">{person.employeeId} · {person.roleLabel || "Salesman"}</span></span>
+            {children.length ? <button type="button" onClick={() => togglePerson(person.id)} className="min-w-0 text-left">
+              <span className="block truncate font-medium text-teal-700 hover:underline">{person.name}</span>
+              <span className="block text-xs text-slate-500">{person.employeeId} · {person.roleLabel || "Salesman"} · {open ? "Hide team" : "Click to view team"}</span>
+            </button> : <span className="min-w-0">
+              <span className="block truncate font-medium text-slate-900">{person.name}</span>
+              <span className="block text-xs text-slate-500">{person.employeeId} · {person.roleLabel || "Salesman"}</span>
+            </span>}
           </div>
         </td>
         <td className="px-3 py-3 text-slate-600">{[person.region, person.city, person.state].filter(Boolean).join(" · ") || "—"}</td>

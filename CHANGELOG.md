@@ -108,3 +108,8 @@ the exact frontend, API and database code deployed at that point.
 - Allow Admins to accept or reject each submitted asset independently.
 - Add a 1–5 shop rating and Admin comment visible to the salesperson.
 - Exclude rejected assets from installed-asset performance totals.
+
+# v1.8.1 — Clickable performance hierarchy
+
+- Make leader names clickable to expand or collapse their reporting hierarchy.
+- Add a clear view-team/hide-team cue beside expandable leaders.
