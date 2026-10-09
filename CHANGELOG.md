@@ -119,3 +119,10 @@ the exact frontend, API and database code deployed at that point.
 - Open a Salesman profile directly from the hierarchy performance table.
 - Show contact, reporting, territory and recent activation details.
 - Allow opening an individual activation and returning to its Salesman profile.
+
+# v1.9.0 — Two-stage activation approval
+
+- Treat RH, City Head or Team Lead approval as the primary approval stage.
+- Send primary-approved activations to the Admin Approvals queue.
+- Reserve final activation approval or rejection for Admins.
+- Show clear awaiting-final-approval status to managers.

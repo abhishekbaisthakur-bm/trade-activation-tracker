@@ -642,15 +642,16 @@ const reviewActivation = async (activationId, status) => {
   setBusy(true);
   setMsg(null);
   try {
-    await api.setStatus(activationId, status);
+    const result = await api.setStatus(activationId, status);
+    const actualStatus = result.activation.status;
     setSalesmanDetails((current) => current ? {
       ...current,
       activations: current.activations.map((activation) =>
-        activation.id === activationId ? { ...activation, status } : activation
+        activation.id === activationId ? { ...activation, status: actualStatus } : activation
       )
     } : current);
     await loadTeam();
-    setMsg({ kind: "success", text: `Activation marked ${status.toLowerCase()}.` });
+    setMsg({ kind: "success", text: actualStatus === "Pending Review" ? "Primary approval saved and sent to Admin for final approval." : "Activation rejected." });
   } catch (e) {
     setMsg({ kind: "error", text: e.message });
   } finally {
@@ -778,15 +779,13 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 {a.master_data_status !== 'verified'?<span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">Master data: {a.master_data_status}</span>:null}
 </div>
 <div className="flex flex-wrap gap-2">
+{a.status === "Submitted" ? <>
 <Button variant="success" size="sm" disabled={busy} onClick={()=>reviewActivation(a.id,"Approved")}>
-<CheckCircle2 size={15}/> Approve
-</Button>
-<Button variant="ghost" size="sm" disabled={busy} onClick={()=>reviewActivation(a.id,"Pending Review")}>
-<Clock size={15}/> Mark pending
+<CheckCircle2 size={15}/> Approve and send to Admin
 </Button>
 <Button variant="danger" size="sm" disabled={busy} onClick={()=>reviewActivation(a.id,"Rejected")}>
 <XCircle size={15}/> Reject
-</Button>
+</Button></> : a.status === "Pending Review" ? <span className="text-xs font-medium text-amber-700">Awaiting final Admin approval</span> : null}
 </div>
 </div>
 <div className="mt-3">

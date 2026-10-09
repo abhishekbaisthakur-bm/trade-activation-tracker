@@ -797,10 +797,18 @@ function AdminAuditLog() {
 /* ------------------------------ approvals ------------------------------ */
 function AdminApprovals({ onApproved }) {
   const [items, setItems] = useState([]);
+  const [activationItems, setActivationItems] = useState([]);
+  const [openActivation, setOpenActivation] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [showHistory, setShowHistory] = useState(false);
-  const load = useCallback(() => api.requests().then((r) => setItems(r.requests)).catch((e) => setError(e.message)), []);
+  const load = useCallback(() => Promise.all([
+    api.requests(),
+    api.activations({ status: "Pending Review", limit: 200, offset: 0 }),
+  ]).then(([requests, activations]) => {
+    setItems(requests.requests);
+    setActivationItems(activations.activations);
+  }).catch((e) => setError(e.message)), []);
   useEffect(() => { load(); }, [load]);
 
   const act = async (id, action) => {
@@ -809,6 +817,20 @@ function AdminApprovals({ onApproved }) {
     try {
       if (action === "approve") await api.approveRequest(id);
       else await api.rejectRequest(id);
+      await load();
+      if (onApproved) onApproved();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const reviewActivation = async (id, status) => {
+    setBusy(id + status);
+    setError("");
+    try {
+      await api.setStatus(id, status);
       await load();
       if (onApproved) onApproved();
     } catch (e) {
@@ -900,6 +922,32 @@ function AdminApprovals({ onApproved }) {
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <div>
+            <h3 className="text-sm font-semibold text-slate-900">Activations awaiting final approval</h3>
+            <p className="text-xs text-slate-500">These were already approved by an RH, City Head or Team Lead.</p>
+          </div>
+          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">{activationItems.length} pending</span>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {activationItems.map((activation) => <div key={activation.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <button type="button" onClick={() => setOpenActivation(activation.id)} className="min-w-0 text-left">
+              <span className="block truncate text-sm font-medium text-teal-700 hover:underline">{activation.pharmacy_name}</span>
+              <span className="block text-xs text-slate-500">{activation.code} · {activation.user_name} ({activation.employee_id}) · {[activation.area, activation.city, activation.state].filter(Boolean).join(", ")}</span>
+            </button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="success" disabled={!!busy} onClick={() => reviewActivation(activation.id, "Approved")}>
+                {busy === activation.id + "Approved" ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle2 size={14}/>} Final approve
+              </Button>
+              <Button size="sm" variant="danger" disabled={!!busy} onClick={() => reviewActivation(activation.id, "Rejected")}>
+                <XCircle size={14}/> Reject
+              </Button>
+            </div>
+          </div>)}
+          {!activationItems.length ? <div className="px-4 py-8 text-center text-sm text-slate-500">No manager-approved activations are waiting for you.</div> : null}
+        </div>
+      </Card>
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div>
             <h3 className="text-sm font-semibold text-slate-900">Pending approvals</h3>
             <p className="text-xs text-slate-500">Only target changes need admin action.</p>
           </div>
@@ -916,6 +964,7 @@ function AdminApprovals({ onApproved }) {
           ) : null}
         </div>
       </Card>
+      {openActivation ? <RecordDetail id={openActivation} onClose={() => setOpenActivation("")} /> : null}
 
       <Card className="overflow-hidden">
         <button type="button" onClick={() => setShowHistory((value) => !value)}

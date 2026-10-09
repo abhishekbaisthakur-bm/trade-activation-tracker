@@ -394,15 +394,34 @@ router.patch("/:id/admin-feedback", requireRole("admin"), async (req, res, next)
 
 /* -------------------------------- review ------------------------------- */
 
-router.patch("/:id/status", requireRole(...LEADER_ROLES), async (req, res, next) => {
+router.patch("/:id/status", requireRole("admin", ...LEADER_ROLES), async (req, res, next) => {
   try {
-    const status = String(req.body.status || "");
-    if (!STATUSES.includes(status)) return res.status(400).json({ error: "Unknown status." });
+    const requestedStatus = String(req.body.status || "");
+    if (!STATUSES.includes(requestedStatus)) return res.status(400).json({ error: "Unknown status." });
+    if (req.user.role === "admin") {
+      if (!["Approved", "Rejected"].includes(requestedStatus)) {
+        return res.status(400).json({ error: "Admin can only give the final approval or rejection." });
+      }
+      const final = await query(
+        `UPDATE activations SET status=$1, reviewed_by=$2, reviewed_at=now(), review_note=$3
+         WHERE id=$4 AND status='Pending Review' RETURNING id, code, status`,
+        [requestedStatus, req.user.id, req.body.note || null, req.params.id]
+      );
+      if (!final.rows.length) return res.status(409).json({ error: "This activation is not waiting for secondary Admin approval." });
+      await audit(req.user.id, "activation.final_review", "activation", req.params.id, { status: requestedStatus });
+      return res.json({ activation: final.rows[0] });
+    }
+    if (!["Approved", "Rejected"].includes(requestedStatus)) {
+      return res.status(400).json({ error: "Choose approve or reject." });
+    }
+    // A leader's approval is the first stage. It deliberately becomes
+    // Pending Review until an Admin makes the final decision.
+    const status = requestedStatus === "Approved" ? "Pending Review" : "Rejected";
     const { rows } = await query(
       `UPDATE activations a
        SET status = $1, reviewed_by = $2, reviewed_at = now(), review_note = $3
        FROM users u
-       WHERE a.id = $4
+       WHERE a.id = $4 AND a.status = 'Submitted'
          AND u.id = a.user_id
          AND u.role = 'field'
          AND ${descendantSql("$2", "u")}
@@ -412,7 +431,7 @@ router.patch("/:id/status", requireRole(...LEADER_ROLES), async (req, res, next)
     if (!rows.length) {
       return res.status(404).json({ error: "Activation not found in your team." });
     }
-    await audit(req.user.id, "activation.status", "activation", req.params.id, { status });
+    await audit(req.user.id, "activation.primary_review", "activation", req.params.id, { status, requestedStatus });
     res.json({ activation: rows[0] });
   } catch (err) {
     next(err);
