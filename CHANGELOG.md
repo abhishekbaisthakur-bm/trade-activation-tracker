@@ -113,3 +113,9 @@ the exact frontend, API and database code deployed at that point.
 
 - Make leader names clickable to expand or collapse their reporting hierarchy.
 - Add a clear view-team/hide-team cue beside expandable leaders.
+
+# v1.8.2 — Salesman drill-down
+
+- Open a Salesman profile directly from the hierarchy performance table.
+- Show contact, reporting, territory and recent activation details.
+- Allow opening an individual activation and returning to its Salesman profile.

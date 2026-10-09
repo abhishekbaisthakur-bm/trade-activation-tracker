@@ -585,7 +585,7 @@ export function AdminOverview({ a }) {
 }
 
 
-export function AdminAnalytics({ a }) {
+export function AdminAnalytics({ a, onOpenSalesperson }) {
   const [peopleRole, setPeopleRole] = useState("regional_head");
   const [expandedPeople, setExpandedPeople] = useState(() => new Set());
   const people = a.byPeople || a.bySales || [];
@@ -615,7 +615,10 @@ export function AdminAnalytics({ a }) {
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-700">
               {open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
             </button> : <span className="h-7 w-7 shrink-0" />}
-            {children.length ? <button type="button" onClick={() => togglePerson(person.id)} className="min-w-0 text-left">
+            {person.role === "field" ? <button type="button" onClick={() => onOpenSalesperson?.(person.id)} className="min-w-0 text-left">
+              <span className="block truncate font-medium text-teal-700 hover:underline">{person.name}</span>
+              <span className="block text-xs text-slate-500">{person.employeeId} · Salesman · Click to view profile</span>
+            </button> : children.length ? <button type="button" onClick={() => togglePerson(person.id)} className="min-w-0 text-left">
               <span className="block truncate font-medium text-teal-700 hover:underline">{person.name}</span>
               <span className="block text-xs text-slate-500">{person.employeeId} · {person.roleLabel || "Salesman"} · {open ? "Hide team" : "Click to view team"}</span>
             </button> : <span className="min-w-0">

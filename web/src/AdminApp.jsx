@@ -948,6 +948,9 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [analyticsProfileUserId, setAnalyticsProfileUserId] = useState("");
+  const [analyticsRecordId, setAnalyticsRecordId] = useState("");
+  const analyticsProfileUser = users.find((person) => person.id === analyticsProfileUserId);
 
   const loadUsers = useCallback(() => {
     api.users().then((r) => setUsers(r.users)).catch((e) => setError(e.message));
@@ -1056,7 +1059,7 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
         ) : null}
 
         {tab === "overview" && a ? <AdminOverview a={a} /> : null}
-        {tab === "analytics" && a ? <AdminAnalytics a={a} /> : null}
+        {tab === "analytics" && a ? <AdminAnalytics a={a} onOpenSalesperson={setAnalyticsProfileUserId} /> : null}
         {tab === "records" ? (
           <AdminRecords filters={f} refreshKey={refreshKey} users={users} />
         ) : null}
@@ -1069,6 +1072,12 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
         {tab === "approvals" ? <AdminApprovals onApproved={() => { onPlansChanged(); loadUsers(); setRefreshKey((k) => k + 1); }} /> : null}
         {tab === "activity" ? <AdminAuditLog /> : null}
       </main>
+      {analyticsProfileUser ? <SalespersonProfile user={analyticsProfileUser}
+        onClose={() => setAnalyticsProfileUserId("")}
+        onOpenRecord={(id) => { setAnalyticsProfileUserId(""); setAnalyticsRecordId(id); }} /> : null}
+      {analyticsRecordId ? <RecordDetail id={analyticsRecordId}
+        onClose={() => setAnalyticsRecordId("")}
+        onOpenSalesperson={(id) => { setAnalyticsRecordId(""); setAnalyticsProfileUserId(id); }} /> : null}
     </div>
   );
 }
