@@ -92,7 +92,7 @@ function ExcelExport({ filters }) {
 
 /* ---------------------------- record detail ----------------------------- */
 
-function RecordDetail({ id, onClose }) {
+function RecordDetail({ id, onClose, onOpenSalesperson }) {
   const [record, setRecord] = useState(null);
   const [photos, setPhotos] = useState({});
   const [photoErrors, setPhotoErrors] = useState({});
@@ -136,7 +136,12 @@ function RecordDetail({ id, onClose }) {
         <div className="grid gap-4 lg:grid-cols-2">
           <div>
             <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-4 py-2">
-              <Row label="Salesperson" value={record.user_name} />
+              <Row label="Salesperson" value={
+                <button type="button" onClick={() => onOpenSalesperson?.(record.user_id)}
+                  className="font-medium text-teal-700 hover:underline">
+                  {record.user_name}
+                </button>
+              } />
               <Row label="Employee ID" value={record.employee_id} />
               <Row label="Date and time" value={`${fmtDate(record.occurred_at)} ${fmtTime(record.occurred_at)}`} />
               <Row label="Pharmacy" value={record.pharmacy_name} />
@@ -200,14 +205,93 @@ function RecordDetail({ id, onClose }) {
 
 /* ------------------------------- records -------------------------------- */
 
-function AdminRecords({ filters, refreshKey }) {
+function SalespersonProfile({ user, onClose, onOpenRecord }) {
+  const [data, setData] = useState({ activations: [], total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    api.activations({ userId: user.id, limit: 10, offset: 0 })
+      .then((result) => live && setData(result))
+      .catch((e) => live && setError(e.message))
+      .finally(() => live && setLoading(false));
+    return () => { live = false; };
+  }, [user.id]);
+
+  const detail = (label, value) => (
+    <div>
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd className="mt-0.5 text-sm font-medium text-slate-900">{value || "—"}</dd>
+    </div>
+  );
+
+  return <Modal title="Salesman profile" onClose={onClose} wide>
+    <div className="space-y-4">
+      <div className="rounded-xl border border-slate-200 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">{user.name}</h3>
+            <p className="text-sm text-slate-500">{user.employeeId} · {roleLabel(user.role)}</p>
+          </div>
+          <span className={`rounded-full border px-2.5 py-1 text-xs ${user.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+            {user.active ? "Active" : "Inactive"}
+          </span>
+        </div>
+        <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {detail("Email", user.email)}
+          {detail("Contact", user.mobile)}
+          {detail("Reporting manager", user.reportingManagerName)}
+          {detail("Region", user.region)}
+          {detail("State", user.state)}
+          {detail("City", user.city)}
+          {detail("Area", user.area)}
+        </dl>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-slate-200">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900">Recent activations</h4>
+            <p className="text-xs text-slate-500">{data.total.toLocaleString("en-IN")} total activation{data.total === 1 ? "" : "s"}</p>
+          </div>
+        </div>
+        {error ? <div className="p-4"><Banner kind="error">{error}</Banner></div> : null}
+        {loading ? <div className="flex justify-center py-8 text-slate-400"><Loader2 className="animate-spin" /></div> : (
+          <div className="divide-y divide-slate-100">
+            {data.activations.map((activation) => <button key={activation.id} type="button"
+              onClick={() => onOpenRecord(activation.id)}
+              className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-teal-50">
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium text-slate-900">{activation.pharmacy_name}</span>
+                <span className="block text-xs text-slate-500">{activation.code} · {activation.city || "City not recorded"}</span>
+              </span>
+              <span className="shrink-0 text-xs text-slate-500">{fmtDate(activation.occurred_at)}</span>
+            </button>)}
+            {!data.activations.length && !error ? <p className="px-4 py-8 text-center text-sm text-slate-500">No activations recorded yet.</p> : null}
+          </div>
+        )}
+      </div>
+    </div>
+  </Modal>;
+}
+
+function AdminRecords({ filters, refreshKey, users }) {
   const [search, setSearch] = useState("");
   const [data, setData] = useState({ activations: [], total: 0 });
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(null);
+  const [profileUserId, setProfileUserId] = useState("");
   const [error, setError] = useState("");
   const limit = 50;
+  const profileUser = users.find((user) => user.id === profileUserId);
+  const openProfile = (userId) => {
+    if (!userId) return;
+    setOpen(null);
+    setProfileUserId(userId);
+  };
 
   useEffect(() => { setOffset(0); }, [filters, search]);
 
@@ -255,7 +339,12 @@ function AdminRecords({ filters, refreshKey }) {
                   <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(a.occurred_at)}</td>
                   <td className="px-4 py-2.5">{a.pharmacy_name}</td>
                   <td className="px-4 py-2.5">{a.city}</td>
-                  <td className="px-4 py-2.5">{a.user_name}</td>
+                  <td className="px-4 py-2.5">
+                    <button type="button" onClick={(event) => { event.stopPropagation(); openProfile(a.user_id); }}
+                      className="font-medium text-teal-700 hover:underline">
+                      {a.user_name}
+                    </button>
+                  </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{a.units}</td>
                   <td className="px-4 py-2.5">
                     <span className={`rounded-full border px-2 py-0.5 text-xs ${statusTone(a.status)}`}>{a.status}</span>
@@ -276,7 +365,9 @@ function AdminRecords({ filters, refreshKey }) {
           <Button variant="ghost" size="sm" disabled={offset + limit >= data.total} onClick={() => setOffset(offset + limit)}>Next</Button>
         </div>
       </div>
-      {open ? <RecordDetail id={open} onClose={() => setOpen(null)} /> : null}
+      {open ? <RecordDetail id={open} onClose={() => setOpen(null)} onOpenSalesperson={openProfile} /> : null}
+      {profileUser ? <SalespersonProfile user={profileUser} onClose={() => setProfileUserId("")}
+        onOpenRecord={(id) => { setProfileUserId(""); setOpen(id); }} /> : null}
     </div>
   );
 }
@@ -389,6 +480,17 @@ function AdminData({ geo, users, filters, onUsersChanged, masterAdmin }) {
   const [busy, setBusy] = useState(false);
   const [userView, setUserView] = useState("all");
   const [expandedUsers, setExpandedUsers] = useState(() => new Set());
+  const [userSearch, setUserSearch] = useState("");
+
+  const searchedUsers = useMemo(() => {
+    const term = userSearch.trim().toLowerCase();
+    if (!term) return [];
+    return users.filter((user) => [
+      user.name, user.employeeId, user.email, user.mobile, roleLabel(user.role),
+      user.region, user.state, user.city, user.area, user.reportingManagerName,
+    ].some((value) => String(value || "").toLowerCase().includes(term)))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [users, userSearch]);
 
   const usersByManager = useMemo(() => {
     const grouped = new Map();
@@ -498,11 +600,25 @@ function AdminData({ geo, users, filters, onUsersChanged, masterAdmin }) {
             <Plus size={15} /> Add user
           </Button>
         </div>
+        <div className="border-b border-slate-200 px-4 py-3">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-3 text-slate-400" />
+            <input value={userSearch} onChange={(event) => setUserSearch(event.target.value)}
+              className={inputCls + " pl-9"}
+              placeholder="Search any name, employee ID, contact, territory or reporting manager" />
+          </div>
+        </div>
         <div className="flex flex-wrap gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
           {[['all','All'],['regional_head','Regional Heads'],['city_head','City Heads'],['team_lead','Team Leads']].map(([value, label]) => <button key={value} type="button" onClick={() => setUserView(value)}
             className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${userView === value ? "border-teal-600 bg-teal-600 text-white" : "border-slate-300 bg-white text-slate-600 hover:border-teal-300"}`}>{label}</button>)}
         </div>
-        {userView === "all" ? <div className="p-4">
+        {userSearch.trim() ? <div className="p-4">
+          <p className="mb-2 text-xs text-slate-500">{searchedUsers.length} matching user{searchedUsers.length === 1 ? "" : "s"}</p>
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            {searchedUsers.map((user) => <HierarchyRow key={user.id} user={user}/>) }
+            {!searchedUsers.length ? <p className="px-4 py-8 text-center text-sm text-slate-500">No users match that search.</p> : null}
+          </div>
+        </div> : userView === "all" ? <div className="p-4">
           <section>
             <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Admins</h4>
             <div className="overflow-hidden rounded-lg border border-slate-200">{users.filter((u) => u.role === "admin").sort((a,b) => a.name.localeCompare(b.name)).map((u) => <HierarchyRow key={u.id} user={u}/>)}</div>
@@ -891,7 +1007,7 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
         {tab === "overview" && a ? <AdminOverview a={a} /> : null}
         {tab === "analytics" && a ? <AdminAnalytics a={a} /> : null}
         {tab === "records" ? (
-          <AdminRecords filters={f} refreshKey={refreshKey} />
+          <AdminRecords filters={f} refreshKey={refreshKey} users={users} />
         ) : null}
         {tab === "plan" && a ? (
           <AdminPlan a={a} planCount={planCount} filters={f} onPlansChanged={onPlansChanged} />

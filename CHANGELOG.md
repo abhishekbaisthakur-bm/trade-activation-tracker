@@ -94,3 +94,8 @@ the exact frontend, API and database code deployed at that point.
 - Enforce creator permissions, reporting hierarchy and territory inheritance.
 - Reject duplicate identifiers and invalid rows without partially creating users.
 - Keep the existing manual Add team member form.
+# v1.7.0 — User search and salesman profiles
+
+- Added a universal Admin Data search across names, IDs, contact details, territory and reporting managers.
+- Added direct salesman profile links from activation records and record details.
+- Salesman profiles show account details, reporting information and recent activations.

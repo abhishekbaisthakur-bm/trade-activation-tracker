@@ -212,7 +212,7 @@ router.get("/", async (req, res, next) => {
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
     const rows = await query(
-      `SELECT a.id, a.code, a.pharmacy_name, a.party_code, a.party_code_duplicate, a.city, a.area, a.state, a.occurred_at, a.status,
+      `SELECT a.id, a.code, a.user_id, a.pharmacy_name, a.party_code, a.party_code_duplicate, a.city, a.area, a.state, a.occurred_at, a.status,
               a.latitude, a.longitude, a.gps_source, u.name AS user_name, u.employee_id,
               COALESCE(SUM(aa.quantity), 0)::int AS units,
               COUNT(aa.id)::int AS asset_count
