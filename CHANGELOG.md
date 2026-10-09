@@ -3,6 +3,13 @@
 Each production push receives a version tag. Use the tag to identify or restore
 the exact frontend, API and database code deployed at that point.
 
+## v1.6.0 — 9 October 2026
+
+- Populate Admin State, City and Area filters from the live pharmacy master list.
+- Add cascading Regional Head, City Head, Team Lead and Salesman filters.
+- Apply hierarchy filters to dashboards, activation records and downloads.
+- Make activation photos clickable at full size and show actionable photo-loading errors.
+
 ## v1.5.0 — 8 October 2026
 
 - Share pharmacy targets and activation reporting between Regional Heads with the same Region.

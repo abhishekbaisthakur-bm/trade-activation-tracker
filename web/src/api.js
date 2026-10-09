@@ -66,7 +66,10 @@ async function request(path, { method = "GET", body, form, raw } = {}) {
     throw new ApiError("Your session expired. Please log in again.", 401);
   }
   if (raw) {
-    if (!res.ok) throw new ApiError("That download failed.", res.status);
+    if (!res.ok) {
+      const data = await res.clone().json().catch(() => ({}));
+      throw new ApiError(data.error || "That file or photo could not be loaded.", res.status, data);
+    }
     return res;
   }
   const data = await res.json().catch(() => ({}));

@@ -19,6 +19,12 @@ function buildFilters(q, opts = {}) {
   if (q.city) add("a.city = ?", q.city);
   if (q.area) add("a.area = ?", q.area);
   if (q.userId) add("a.user_id = ?", q.userId);
+  // Admin/leader dashboards can narrow activations to every field user below
+  // a selected Regional Head, City Head or Team Lead.
+  if (q.scopeUserId) {
+    params.push(q.scopeUserId);
+    where.push(descendantSql(`$${params.length}`, "u"));
+  }
   if (q.status && STATUSES.includes(q.status)) add("a.status = ?", q.status);
   if (q.asset && ASSET_KEYS.includes(q.asset)) {
     add("EXISTS (SELECT 1 FROM activation_assets x WHERE x.activation_id = a.id AND x.asset_type = ?)", q.asset);

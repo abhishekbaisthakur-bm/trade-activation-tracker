@@ -19,16 +19,55 @@ const daysAgoStr = (n) => new Date(Date.now() - n * 86400000).toISOString().slic
 
 function FilterBar({ geo, users, f, setF }) {
   const upd = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const byId = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+  const isBelow = useCallback((user, ancestorId) => {
+    if (!ancestorId) return true;
+    let current = user;
+    const seen = new Set();
+    while (current?.managerId && !seen.has(current.managerId)) {
+      if (current.managerId === ancestorId) return true;
+      seen.add(current.managerId);
+      current = byId.get(current.managerId);
+    }
+    return false;
+  }, [byId]);
+  const rhs = users.filter((u) => u.active && u.role === "regional_head");
+  const cityHeads = users.filter((u) => u.active && u.role === "city_head" && isBelow(u, f.rhId));
+  const teamLeads = users.filter((u) => u.active && u.role === "team_lead" && isBelow(u, f.chId || f.rhId));
+  const salespeople = users.filter((u) => u.active && u.role === "field" && isBelow(u, f.tlId || f.chId || f.rhId));
+  const chooseLeader = (level, value) => setF((p) => {
+    const next = { ...p, [level]: value, userId: "" };
+    if (level === "rhId") Object.assign(next, { chId: "", tlId: "" });
+    if (level === "chId") Object.assign(next, { tlId: "" });
+    next.scopeUserId = value || (level === "tlId" ? p.chId || p.rhId : level === "chId" ? p.rhId : "");
+    return next;
+  });
   return (
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-7">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
       <input type="date" value={f.from} onChange={(e) => upd("from", e.target.value)} className={inputCls} />
       <input type="date" value={f.to} onChange={(e) => upd("to", e.target.value)} className={inputCls} />
       <Select value={f.state} onChange={(v) => setF((p) => ({ ...p, state: v, city: "", area: "" }))} options={geo.states} placeholder="All states" />
       <Select value={f.city} onChange={(v) => setF((p) => ({ ...p, city: v, area: "" }))} options={geo.cities(f.state)} placeholder="All cities" />
       <Select value={f.area} onChange={(v) => upd("area", v)} options={geo.areas(f.city, f.state)} placeholder="All areas" />
-      <select value={f.userId} onChange={(e) => upd("userId", e.target.value)} className={inputCls}>
+      <select value={f.rhId} onChange={(e) => chooseLeader("rhId", e.target.value)} className={inputCls}>
+        <option value="">All Regional Heads</option>
+        {rhs.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+      </select>
+      <select value={f.chId} onChange={(e) => chooseLeader("chId", e.target.value)} className={inputCls}>
+        <option value="">All City Heads</option>
+        {cityHeads.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+      </select>
+      <select value={f.tlId} onChange={(e) => chooseLeader("tlId", e.target.value)} className={inputCls}>
+        <option value="">All Team Leads</option>
+        {teamLeads.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+      </select>
+      <select value={f.userId} onChange={(e) => setF((p) => ({
+        ...p,
+        userId: e.target.value,
+        scopeUserId: e.target.value ? "" : (p.tlId || p.chId || p.rhId),
+      }))} className={inputCls}>
         <option value="">All salespeople</option>
-        {users.filter((u) => u.role === "field").map((u) => (
+        {salespeople.map((u) => (
           <option key={u.id} value={u.id}>{u.name}</option>
         ))}
       </select>
@@ -56,6 +95,7 @@ function ExcelExport({ filters }) {
 function RecordDetail({ id, onClose }) {
   const [record, setRecord] = useState(null);
   const [photos, setPhotos] = useState({});
+  const [photoErrors, setPhotoErrors] = useState({});
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -71,7 +111,9 @@ function RecordDetail({ id, onClose }) {
             const url = await api.photoUrl(id, a.asset_type);
             urls.push(url);
             if (live) setPhotos((p) => ({ ...p, [a.asset_type]: url }));
-          } catch (e) { /* photo missing from storage, tile shows the gap */ }
+          } catch (e) {
+            if (live) setPhotoErrors((p) => ({ ...p, [a.asset_type]: e.message || "Photo could not be loaded." }));
+          }
         }
       })
       .catch((e) => setError(e.message));
@@ -129,11 +171,14 @@ function RecordDetail({ id, onClose }) {
               {record.assets.map((x) => (
                 <div key={x.asset_type} className="overflow-hidden rounded-lg border border-slate-200">
                   {photos[x.asset_type] ? (
-                    <img src={photos[x.asset_type]} alt={`${assetLabel(x.asset_type)} proof`} className="h-32 w-full object-cover" />
+                    <a href={photos[x.asset_type]} target="_blank" rel="noreferrer" title="Open full-size photo">
+                      <img src={photos[x.asset_type]} alt={`${assetLabel(x.asset_type)} proof`} className="h-32 w-full object-cover" />
+                    </a>
                   ) : (
                     <div className="flex h-32 flex-col items-center justify-center gap-1 bg-slate-50 text-slate-400">
-                      {x.photo_id ? <Loader2 size={18} className="animate-spin" /> : <ImageIcon size={18} />}
+                      {x.photo_id && !photoErrors[x.asset_type] ? <Loader2 size={18} className="animate-spin" /> : <ImageIcon size={18} />}
                       {!x.photo_id ? <span className="px-2 text-center text-xs">No photo (distributed item)</span> : null}
+                      {photoErrors[x.asset_type] ? <span className="px-2 text-center text-xs text-red-600">{photoErrors[x.asset_type]}</span> : null}
                     </div>
                   )}
                   <div className="flex items-center justify-between px-2 py-1.5 text-xs">
@@ -731,7 +776,7 @@ function AdminApprovals({ onApproved }) {
 
 export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogout }) {
   const [tab, setTab] = useState("overview");
-  const [f, setF] = useState({ from: daysAgoStr(30), to: todayStr(), state: "", city: "", area: "", userId: "", asset: "" });
+  const [f, setF] = useState({ from: daysAgoStr(30), to: todayStr(), state: "", city: "", area: "", rhId: "", chId: "", tlId: "", scopeUserId: "", userId: "", asset: "" });
   const [summary, setSummary] = useState(null);
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
@@ -785,6 +830,15 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
     };
   }, [summary]);
 
+  // Admin geography is sourced from the current pharmacy master, not the old
+  // target upload. The backend returns cascading choices for the active state
+  // and city so newly uploaded locations appear without a redeploy.
+  const liveGeo = useMemo(() => ({
+    states: summary?.filterOptions?.states || geo.states || [],
+    cities: () => summary?.filterOptions?.cities || [],
+    areas: () => summary?.filterOptions?.areas || [],
+  }), [summary, geo]);
+
   const tabs = [
     { key: "overview", label: "Overview", icon: LayoutDashboard },
     { key: "analytics", label: "Performance", icon: BarChart3 },
@@ -826,7 +880,7 @@ export default function AdminApp({ user, geo, planCount, onPlansChanged, onLogou
       </header>
 
       <main className="mx-auto max-w-7xl space-y-4 px-4 py-5">
-        {tab !== "data" && tab !== "approvals" && tab !== "activity" ? <FilterBar geo={geo} users={users} f={f} setF={setF} /> : null}
+        {tab !== "data" && tab !== "approvals" && tab !== "activity" ? <FilterBar geo={liveGeo} users={users} f={f} setF={setF} /> : null}
         {(tab === "overview" || tab === "analytics") ? <ExcelExport filters={f} /> : null}
         {error ? <Banner kind="error">{error}</Banner> : null}
 

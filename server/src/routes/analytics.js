@@ -140,9 +140,16 @@ async function summary(q, opts = {}) {
   // leader's hierarchy. They deliberately ignore the current city/area while
   // building the relevant parent list, so selecting a value never makes the
   // other valid values disappear.
+  const stateScope = buildMasterPlanFilters({}, opts);
   const cityScope = buildMasterPlanFilters({ state: q.state }, opts);
   const areaScope = buildMasterPlanFilters({ state: q.state, city: q.city }, opts);
-  const [cityOptions, areaOptions] = await Promise.all([
+  const [stateOptions, cityOptions, areaOptions] = await Promise.all([
+    query(
+      `SELECT DISTINCT trim(ph.state) AS value FROM pharmacies ph
+       ${stateScope.clause} AND NULLIF(trim(ph.state), '') IS NOT NULL
+       ORDER BY value`,
+      stateScope.params
+    ),
     query(
       `SELECT DISTINCT trim(ph.city) AS value FROM pharmacies ph
        ${cityScope.clause} AND NULLIF(trim(ph.city), '') IS NOT NULL
@@ -180,6 +187,9 @@ async function summary(q, opts = {}) {
   });
 
   // Salesperson performance, target is an equal share of their city plan
+  const salesParams = [...params];
+  const assetSalesPlaceholder = q.asset ? `$${salesParams.push(q.asset)}` : null;
+  const hierarchySalesPlaceholder = q.scopeUserId ? `$${salesParams.push(q.scopeUserId)}` : null;
   const sales = await query(
     `SELECT u.id, u.name, u.employee_id, u.assigned_city AS city,
             COUNT(DISTINCT a.shop_key)::int AS shops,
@@ -190,13 +200,14 @@ async function summary(q, opts = {}) {
        SELECT a2.id FROM activations a2 JOIN users u2 ON u2.id = a2.user_id ${effectiveClause.replace(/\ba\./g, "a2.").replace(/\bu\./g, "u2.")}
      )
      LEFT JOIN activation_assets aa ON aa.activation_id = a.id
-       ${q.asset ? "AND aa.asset_type = $" + (params.length + 1) : ""}
+       ${q.asset ? `AND aa.asset_type = ${assetSalesPlaceholder}` : ""}
      WHERE u.role = 'field'
+       ${q.scopeUserId ? `AND ${descendantSql(hierarchySalesPlaceholder, "u")}` : ""}
        ${opts.regionScope
          ? `AND regexp_replace(lower(COALESCE(u.region, '')), '\\s+', '', 'g') = regexp_replace(lower($${params.length}), '\\s+', '', 'g')`
          : opts.ancestorId ? `AND ${descendantSql(`$${params.length}`, "u")}` : ""}
      GROUP BY u.id ORDER BY shops DESC`,
-    q.asset ? [...params, q.asset] : params
+    salesParams
   );
   const cityPlanMap = Object.fromEntries(byCity.map((r) => [r.key, r.plannedShops]));
   const headcount = {};
@@ -208,6 +219,7 @@ async function summary(q, opts = {}) {
 
   // Every leadership row rolls up all salespeople below that person. A logged-in
   // leader receives only their own subtree; Admin receives the full hierarchy.
+  const peopleAncestor = q.scopeUserId || opts.ancestorId || null;
   const peopleResult = await query(
     `SELECT u.id, u.name, u.employee_id, u.role, u.region,
             u.assigned_state AS state, u.assigned_city AS city, u.manager_id,
@@ -215,8 +227,8 @@ async function summary(q, opts = {}) {
      FROM users u
      LEFT JOIN users manager ON manager.id = u.manager_id
      WHERE u.active = TRUE AND u.role <> 'admin'
-       ${opts.ancestorId ? `AND ${descendantOrSelfSql("$1", "u")}` : ""}`,
-    opts.ancestorId ? [opts.ancestorId] : []
+       ${peopleAncestor ? `AND ${descendantOrSelfSql("$1", "u")}` : ""}`,
+    peopleAncestor ? [peopleAncestor] : []
   );
   const people = peopleResult.rows;
   const children = new Map();
@@ -288,6 +300,7 @@ async function summary(q, opts = {}) {
     },
     byState, byCity, byArea, byAsset, bySales, byPeople,
     filterOptions: {
+      states: stateOptions.rows.map((row) => row.value),
       cities: cityOptions.rows.map((row) => row.value),
       areas: areaOptions.rows.map((row) => row.value),
     },
@@ -300,6 +313,16 @@ const managerScope = (user) => ({
   leader: user,
   regionScope: user.role === "regional_head" ? user.region : null,
 });
+
+async function selectedAdminScope(q) {
+  if (!q.scopeUserId) return {};
+  const { rows } = await query(
+    `SELECT id, role, region, assigned_state, assigned_city
+     FROM users WHERE id=$1 AND active=TRUE AND role IN ('regional_head','city_head','team_lead')`,
+    [q.scopeUserId]
+  );
+  return rows[0] ? { leader: rows[0] } : {};
+}
 
 router.get("/manager/team", requireRole(...LEADER_ROLES), async (req, res, next) => {
   try {
@@ -410,7 +433,7 @@ router.get("/manager/summary", requireRole(...LEADER_ROLES), async (req, res, ne
 
 router.get("/summary", requireAdmin, async (req, res, next) => {
   try {
-    res.json(await summary(req.query));
+    res.json(await summary(req.query, await selectedAdminScope(req.query)));
   } catch (err) {
     next(err);
   }
@@ -419,7 +442,7 @@ router.get("/summary", requireAdmin, async (req, res, next) => {
 router.get("/export/performance.xlsx", requireRole("admin", ...LEADER_ROLES), async (req, res, next) => {
   try {
     const leader = LEADER_ROLES.includes(req.user.role);
-    const opts = leader ? managerScope(req.user) : {};
+    const opts = leader ? managerScope(req.user) : await selectedAdminScope(req.query);
     const data = await summary(req.query, opts);
     const { clause, params } = buildFilters(req.query, opts);
     const records = await query(
@@ -547,7 +570,7 @@ router.get("/export/activations.csv", requireAdmin, async (req, res, next) => {
 
 router.get("/export/plan-vs-actual.csv", requireAdmin, async (req, res, next) => {
   try {
-    const data = await summary(req.query);
+    const data = await summary(req.query, await selectedAdminScope(req.query));
     const lines = ["City,State,Planned shops,Activated shops,Shop penetration %,Assets planned,Assets installed,Asset penetration %"];
     data.byCity.forEach((r) =>
       lines.push([r.key, r.state, r.plannedShops, r.activatedShops, r.shopPen, r.plannedAssets, r.installed, r.assetPen].map(csvEscape).join(","))
