@@ -137,3 +137,8 @@ the exact frontend, API and database code deployed at that point.
 - Add a separate optional Shop photo field to the Salesman activation form.
 - Store shop photos alongside authenticated activation evidence.
 - Show shop photos to managers and Admins without treating them as an installed asset.
+
+# v1.10.1 — Shop photo placement
+
+- Move the optional Shop photo field to the end of the Assets step.
+- Keep every collateral asset visible before the optional shop-photo control.

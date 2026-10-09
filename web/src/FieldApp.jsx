@@ -203,27 +203,6 @@ function NewActivation({ user, geo, onSubmitted }) {
             <Field label="Shop address" hint="Optional">
               <TextInput value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Shop no., street" />
             </Field>
-            <Field label="Shop photo" hint="Optional">
-              <input ref={shopPhotoRef} type="file" accept="image/*" capture="environment" className="hidden"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (!file) return;
-                  try {
-                    const dataUrl = await fileToCompressedDataUrl(file);
-                    setPhotos((current) => ({ ...current, shop_photo: { dataUrl, ts: new Date().toISOString() } }));
-                    setError("");
-                  } catch (err) { setError(err.message); }
-                }} />
-              {photos.shop_photo ? <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2">
-                <img src={photos.shop_photo.dataUrl} alt="Shop" className="h-16 w-16 rounded-md object-cover" />
-                <div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-900">Shop photo added</p><p className="text-xs text-slate-500">Optional storefront or interior photo</p></div>
-                <Button variant="ghost" size="sm" onClick={() => shopPhotoRef.current?.click()}>Change</Button>
-                <button type="button" onClick={() => setPhotos((current) => { const next = { ...current }; delete next.shop_photo; return next; })} className="text-xs font-medium text-rose-600">Remove</button>
-              </div> : <Button type="button" variant="ghost" className="w-full" onClick={() => shopPhotoRef.current?.click()}>
-                <Store size={16}/> Capture or upload shop photo
-              </Button>}
-            </Field>
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
               Date, time and your employee ID are recorded by the server at submission.
             </div>
@@ -259,6 +238,29 @@ function NewActivation({ user, geo, onSubmitted }) {
                   onRemovePhoto={() => setPhotos((p) => { const np = { ...p }; delete np[a.key]; return np; })}
                 />
               ))}
+            </div>
+            <div className="border-t border-slate-200 pt-4">
+              <Field label="Shop photo" hint="Optional — add after reviewing all assets">
+                <input ref={shopPhotoRef} type="file" accept="image/*" capture="environment" className="hidden"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!file) return;
+                    try {
+                      const dataUrl = await fileToCompressedDataUrl(file);
+                      setPhotos((current) => ({ ...current, shop_photo: { dataUrl, ts: new Date().toISOString() } }));
+                      setError("");
+                    } catch (err) { setError(err.message); }
+                  }} />
+                {photos.shop_photo ? <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2">
+                  <img src={photos.shop_photo.dataUrl} alt="Shop" className="h-16 w-16 rounded-md object-cover" />
+                  <div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-900">Shop photo added</p><p className="text-xs text-slate-500">Optional storefront or interior photo</p></div>
+                  <Button variant="ghost" size="sm" onClick={() => shopPhotoRef.current?.click()}>Change</Button>
+                  <button type="button" onClick={() => setPhotos((current) => { const next = { ...current }; delete next.shop_photo; return next; })} className="text-xs font-medium text-rose-600">Remove</button>
+                </div> : <Button type="button" variant="ghost" className="w-full" onClick={() => shopPhotoRef.current?.click()}>
+                  <Store size={16}/> Capture or upload shop photo
+                </Button>}
+              </Field>
             </div>
           </>
         ) : null}
