@@ -400,6 +400,7 @@ router.get("/manager/team/:userId/activations", requireRole(...LEADER_ROLES), as
          a.longitude,
          a.gps_accuracy,
          a.status,
+         EXISTS (SELECT 1 FROM photos sp WHERE sp.activation_id=a.id AND sp.asset_type='shop_photo') AS has_shop_photo,
          COALESCE(mdr.status, 'verified') AS master_data_status,
          COALESCE(
            json_agg(
@@ -426,9 +427,15 @@ router.get("/manager/team/:userId/activations", requireRole(...LEADER_ROLES), as
     );
 
     const canSeePartyFlag = ["regional_head", "city_head"].includes(req.user.role);
+    const activations = rows.map((row) => ({
+      ...row,
+      assets: row.has_shop_photo
+        ? [...row.assets, { assetType: "shop_photo", quantity: null, hasPhoto: true }]
+        : row.assets,
+    }));
     res.json({
       salesperson: member.rows[0],
-      activations: rows.map((row) => canSeePartyFlag ? row : { ...row, party_code_duplicate: false })
+      activations: activations.map((row) => canSeePartyFlag ? row : { ...row, party_code_duplicate: false })
     });
   } catch (err) {
     next(err);

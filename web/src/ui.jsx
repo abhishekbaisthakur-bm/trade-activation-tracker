@@ -20,7 +20,7 @@ export const ASSETS = [
   { key: "brown_envelope", label: "Brown Envelope", mode: "distributed" },
 ];
 export const ASSET_KEYS = ASSETS.map((a) => a.key);
-export const assetLabel = (k) => (ASSETS.find((a) => a.key === k) || {}).label || k;
+export const assetLabel = (k) => k === "shop_photo" ? "Shop photo" : (ASSETS.find((a) => a.key === k) || {}).label || k;
 
 export const STATUSES = ["Submitted", "Pending Review", "Approved", "Rejected"];
 

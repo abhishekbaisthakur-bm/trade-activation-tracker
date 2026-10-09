@@ -112,7 +112,7 @@ function RecordDetail({ id, onClose, onOpenSalesperson }) {
         setRecord(activation);
         setRating(activation.shop_rating || "");
         setComment(activation.admin_comment || "");
-        setAssetStatuses(Object.fromEntries(activation.assets.map((asset) => [asset.asset_type, asset.review_status || "pending"])));
+        setAssetStatuses(Object.fromEntries(activation.assets.filter((asset) => asset.review_status).map((asset) => [asset.asset_type, asset.review_status])));
         for (const a of activation.assets) {
           if (!a.photo_id) continue;
           try {
@@ -211,12 +211,12 @@ function RecordDetail({ id, onClose, onOpenSalesperson }) {
                   )}
                   <div className="flex items-center justify-between px-2 py-1.5 text-xs">
                     <span className="font-medium text-slate-800">{assetLabel(x.asset_type)}</span>
-                    <span className="tabular-nums text-slate-500">Qty {x.quantity}</span>
+                    {x.quantity ? <span className="tabular-nums text-slate-500">Qty {x.quantity}</span> : null}
                   </div>
                   <div className="border-t border-slate-100 px-2 py-1 text-xs text-slate-400">
                     {x.captured_at ? `${fmtDate(x.captured_at)} ${fmtTime(x.captured_at)}` : "-"}
                   </div>
-                  <div className="grid grid-cols-2 gap-1 border-t border-slate-100 p-2">
+                  {x.review_status ? <div className="grid grid-cols-2 gap-1 border-t border-slate-100 p-2">
                     <button type="button" onClick={() => setAssetStatuses((current) => ({ ...current, [x.asset_type]: "accepted" }))}
                       className={`rounded-md border px-2 py-1 text-xs font-medium ${assetStatuses[x.asset_type] === "accepted" ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 text-slate-600 hover:border-emerald-300"}`}>
                       Accept
@@ -225,7 +225,7 @@ function RecordDetail({ id, onClose, onOpenSalesperson }) {
                       className={`rounded-md border px-2 py-1 text-xs font-medium ${assetStatuses[x.asset_type] === "rejected" ? "border-rose-600 bg-rose-600 text-white" : "border-slate-200 text-slate-600 hover:border-rose-300"}`}>
                       Reject
                     </button>
-                  </div>
+                  </div> : null}
                 </div>
               ))}
             </div>

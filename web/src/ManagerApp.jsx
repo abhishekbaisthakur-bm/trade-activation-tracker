@@ -790,7 +790,7 @@ const tabs=[['overview','Overview',Store],['performance','Performance',BarChart3
 </div>
 <div className="mt-3">
 <p className="text-sm font-medium">Assets:</p>{a.assets?.length?<div className="mt-2 grid gap-3 sm:grid-cols-2">{a.assets.map(x=>{const photoKey=`${a.id}-${x.assetType}`;const photoUrl=photoUrls[photoKey];return <div key={x.assetType} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-<p className="text-sm font-medium">{x.assetType} ({x.quantity})</p>{photoUrl?<a href={photoUrl} target="_blank" rel="noreferrer" className="mt-2 block">
+<p className="text-sm font-medium">{assetLabel(x.assetType)}{x.quantity ? ` (${x.quantity})` : ""}</p>{photoUrl?<a href={photoUrl} target="_blank" rel="noreferrer" className="mt-2 block">
 <img src={photoUrl} alt={`${x.assetType} proof`} className="h-40 w-full rounded-lg border border-slate-200 object-cover"/>
 <p className="mt-1 text-xs text-teal-700">Click photo to view full size</p>
 </a>:x.hasPhoto?<p className="mt-2 text-xs text-slate-500">Loading photo...</p>:<p className="mt-2 text-xs text-slate-400">No proof photo</p>}</div>})}</div>:<p className="mt-1 text-sm text-slate-500">None</p>}</div>

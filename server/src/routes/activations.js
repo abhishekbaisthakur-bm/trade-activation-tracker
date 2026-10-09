@@ -178,6 +178,18 @@ router.post("/", requireRole("field"), upload.any(), async (req, res, next) => {
             [activation.id, a.key, key, driver.name, file.mimetype, file.size, payload.photoTimes && payload.photoTimes[a.key] ? new Date(payload.photoTimes[a.key]) : occurredAt]
           );
         }
+        const shopPhoto = fileFor("shop_photo");
+        if (shopPhoto) {
+          const key = buildKey(activation.id, "shop_photo", shopPhoto.mimetype);
+          await driver.put(key, shopPhoto.buffer, shopPhoto.mimetype);
+          stored.push(key);
+          await client.query(
+            `INSERT INTO photos (activation_id, asset_type, storage_key, storage_driver, mime_type, byte_size, captured_at)
+             VALUES ($1,'shop_photo',$2,$3,$4,$5,$6)`,
+            [activation.id, key, driver.name, shopPhoto.mimetype, shopPhoto.size,
+              payload.photoTimes?.shop_photo ? new Date(payload.photoTimes.shop_photo) : occurredAt]
+          );
+        }
         return activation;
       });
 
@@ -255,7 +267,12 @@ async function fetchActivation(id) {
     `SELECT aa.asset_type, aa.quantity, aa.review_status, p.id AS photo_id, p.captured_at, p.byte_size
      FROM activation_assets aa
      LEFT JOIN photos p ON p.activation_id = aa.activation_id AND p.asset_type = aa.asset_type
-     WHERE aa.activation_id = $1 ORDER BY aa.asset_type`,
+     WHERE aa.activation_id = $1
+     UNION ALL
+     SELECT 'shop_photo' AS asset_type, NULL::integer AS quantity, NULL::text AS review_status,
+            p.id AS photo_id, p.captured_at, p.byte_size
+     FROM photos p WHERE p.activation_id=$1 AND p.asset_type='shop_photo'
+     ORDER BY asset_type`,
     [id]
   );
   const masterReview = await query(

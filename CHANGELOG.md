@@ -131,3 +131,9 @@ the exact frontend, API and database code deployed at that point.
 
 - Show each pharmacy's approval stage inside the Admin Salesman profile.
 - Distinguish manager-pending, Admin-pending, approved and rejected activations.
+
+# v1.10.0 — Optional shop photos
+
+- Add a separate optional Shop photo field to the Salesman activation form.
+- Store shop photos alongside authenticated activation evidence.
+- Show shop photos to managers and Admins without treating them as an installed asset.
