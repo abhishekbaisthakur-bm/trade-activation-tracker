@@ -99,3 +99,12 @@ the exact frontend, API and database code deployed at that point.
 - Added a universal Admin Data search across names, IDs, contact details, territory and reporting managers.
 - Added direct salesman profile links from activation records and record details.
 - Salesman profiles show account details, reporting information and recent activations.
+
+# v1.8.0 — Geography-scoped teams and activation feedback
+
+- Filter the employee performance roster by the selected state, city and area.
+- Add collapsible RH → City Head → Team Lead → Salesman performance drill-downs.
+- Show consolidated target, activated-shop and completion results for every leader.
+- Allow Admins to accept or reject each submitted asset independently.
+- Add a 1–5 shop rating and Admin comment visible to the salesperson.
+- Exclude rejected assets from installed-asset performance totals.

@@ -65,7 +65,7 @@ async function summary(q, opts = {}) {
               COALESCE(SUM(aa.quantity), 0)::int AS installed
        FROM activations a
        JOIN users u ON u.id = a.user_id
-       LEFT JOIN activation_assets aa ON aa.activation_id = a.id
+       LEFT JOIN activation_assets aa ON aa.activation_id = a.id AND aa.review_status <> 'rejected'
          ${q.asset ? "AND aa.asset_type = $" + (params.length + 1) : ""}
        ${effectiveClause}
        GROUP BY ${actualGroup}`,
@@ -168,7 +168,7 @@ async function summary(q, opts = {}) {
   const actualByAsset = await query(
     `SELECT aa.asset_type, COALESCE(SUM(aa.quantity), 0)::int AS installed
      FROM activations a JOIN users u ON u.id = a.user_id
-     JOIN activation_assets aa ON aa.activation_id = a.id
+     JOIN activation_assets aa ON aa.activation_id = a.id AND aa.review_status <> 'rejected'
      ${effectiveClause} GROUP BY aa.asset_type`,
     params
   );
@@ -190,6 +190,22 @@ async function summary(q, opts = {}) {
   const salesParams = [...params];
   const assetSalesPlaceholder = q.asset ? `$${salesParams.push(q.asset)}` : null;
   const hierarchySalesPlaceholder = q.scopeUserId ? `$${salesParams.push(q.scopeUserId)}` : null;
+  const salesUserGeo = [];
+  if (q.state) {
+    const placeholder = `$${salesParams.push(q.state)}`;
+    salesUserGeo.push(`regexp_replace(lower(COALESCE(u.assigned_state, '')), '\\s+', '', 'g') = regexp_replace(lower(${placeholder}), '\\s+', '', 'g')`);
+  }
+  if (q.city) {
+    const placeholder = `$${salesParams.push(q.city)}`;
+    salesUserGeo.push(`lower(trim(COALESCE(u.assigned_city, ''))) = lower(trim(${placeholder}))`);
+  }
+  if (q.area) {
+    const placeholder = `$${salesParams.push(q.area)}`;
+    salesUserGeo.push(`(
+      lower(trim(COALESCE(u.assigned_area, ''))) = lower(trim(${placeholder}))
+      OR EXISTS (SELECT 1 FROM activations area_activation WHERE area_activation.user_id=u.id AND lower(trim(COALESCE(area_activation.area,'')))=lower(trim(${placeholder})))
+    )`);
+  }
   const sales = await query(
     `SELECT u.id, u.name, u.employee_id, u.assigned_city AS city,
             COUNT(DISTINCT a.shop_key)::int AS shops,
@@ -199,9 +215,10 @@ async function summary(q, opts = {}) {
      LEFT JOIN activations a ON a.user_id = u.id AND a.id IN (
        SELECT a2.id FROM activations a2 JOIN users u2 ON u2.id = a2.user_id ${effectiveClause.replace(/\ba\./g, "a2.").replace(/\bu\./g, "u2.")}
      )
-     LEFT JOIN activation_assets aa ON aa.activation_id = a.id
+     LEFT JOIN activation_assets aa ON aa.activation_id = a.id AND aa.review_status <> 'rejected'
        ${q.asset ? `AND aa.asset_type = ${assetSalesPlaceholder}` : ""}
      WHERE u.role = 'field'
+       ${salesUserGeo.length ? `AND ${salesUserGeo.join(" AND ")}` : ""}
        ${q.scopeUserId ? `AND ${descendantSql(hierarchySalesPlaceholder, "u")}` : ""}
        ${opts.regionScope
          ? `AND regexp_replace(lower(COALESCE(u.region, '')), '\\s+', '', 'g') = regexp_replace(lower($${params.length}), '\\s+', '', 'g')`
@@ -251,7 +268,7 @@ async function summary(q, opts = {}) {
     return found;
   };
   const roleOrder = { regional_head: 0, city_head: 1, team_lead: 2, field: 3 };
-  const byPeople = people.map((person) => {
+  const byPeople = people.filter((person) => fieldIdsBelow(person).some((id) => salesById.has(id))).map((person) => {
     const salespeople = fieldIdsBelow(person).map((id) => salesById.get(id)).filter(Boolean);
     const shops = salespeople.reduce((sum, item) => sum + item.shops, 0);
     const installed = salespeople.reduce((sum, item) => sum + item.installed, 0);

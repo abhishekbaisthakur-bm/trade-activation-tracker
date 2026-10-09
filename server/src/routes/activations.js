@@ -213,9 +213,12 @@ router.get("/", async (req, res, next) => {
 
     const rows = await query(
       `SELECT a.id, a.code, a.user_id, a.pharmacy_name, a.party_code, a.party_code_duplicate, a.city, a.area, a.state, a.occurred_at, a.status,
+              a.shop_rating, a.admin_comment,
               a.latitude, a.longitude, a.gps_source, u.name AS user_name, u.employee_id,
               COALESCE(SUM(aa.quantity), 0)::int AS units,
-              COUNT(aa.id)::int AS asset_count
+              COUNT(aa.id)::int AS asset_count,
+              COUNT(aa.id) FILTER (WHERE aa.review_status='accepted')::int AS accepted_asset_count,
+              COUNT(aa.id) FILTER (WHERE aa.review_status='rejected')::int AS rejected_asset_count
        FROM activations a
        JOIN users u ON u.id = a.user_id
        LEFT JOIN activation_assets aa ON aa.activation_id = a.id
@@ -249,7 +252,7 @@ async function fetchActivation(id) {
   );
   if (!rows.length) return null;
   const assets = await query(
-    `SELECT aa.asset_type, aa.quantity, p.id AS photo_id, p.captured_at, p.byte_size
+    `SELECT aa.asset_type, aa.quantity, aa.review_status, p.id AS photo_id, p.captured_at, p.byte_size
      FROM activation_assets aa
      LEFT JOIN photos p ON p.activation_id = aa.activation_id AND p.asset_type = aa.asset_type
      WHERE aa.activation_id = $1 ORDER BY aa.asset_type`,
@@ -344,6 +347,47 @@ router.get("/:id/photo/:asset", async (req, res, next) => {
 
     res.send(buffer);
   } catch (err) {
+    next(err);
+  }
+});
+
+/* --------------------------- admin feedback ---------------------------- */
+
+router.patch("/:id/admin-feedback", requireRole("admin"), async (req, res, next) => {
+  try {
+    const rating = req.body.rating === null || req.body.rating === "" || req.body.rating === undefined
+      ? null : Number(req.body.rating);
+    if (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 5)) {
+      return res.status(400).json({ error: "Rating must be between 1 and 5." });
+    }
+    const comment = String(req.body.comment || "").trim() || null;
+    const assetStatuses = req.body.assetStatuses || {};
+    const validStatuses = new Set(["pending", "accepted", "rejected"]);
+    if (Object.values(assetStatuses).some((status) => !validStatuses.has(status))) {
+      return res.status(400).json({ error: "Unknown asset review status." });
+    }
+
+    const result = await withTransaction(async (client) => {
+      const activation = await client.query("SELECT id FROM activations WHERE id=$1 FOR UPDATE", [req.params.id]);
+      if (!activation.rows.length) throw Object.assign(new Error("Activation not found."), { status: 404 });
+      await client.query(
+        `UPDATE activations SET shop_rating=$1, admin_comment=$2, reviewed_by=$3, reviewed_at=now() WHERE id=$4`,
+        [rating, comment, req.user.id, req.params.id]
+      );
+      for (const [assetType, status] of Object.entries(assetStatuses)) {
+        const changed = await client.query(
+          `UPDATE activation_assets SET review_status=$1, reviewed_by=$2, reviewed_at=now()
+           WHERE activation_id=$3 AND asset_type=$4 RETURNING id`,
+          [status, req.user.id, req.params.id, assetType]
+        );
+        if (!changed.rows.length) throw Object.assign(new Error(`Asset ${assetType} was not found on this activation.`), { status: 400 });
+      }
+      return true;
+    });
+    if (result) await audit(req.user.id, "activation.feedback", "activation", req.params.id, { rating, assetStatuses });
+    res.json({ activation: await fetchActivation(req.params.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });

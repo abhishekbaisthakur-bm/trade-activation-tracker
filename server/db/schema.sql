@@ -133,7 +133,17 @@ CREATE TABLE IF NOT EXISTS activation_assets (
   quantity      INTEGER NOT NULL CHECK (quantity > 0),
   UNIQUE (activation_id, asset_type)
 );
+ALTER TABLE activation_assets ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE activation_assets DROP CONSTRAINT IF EXISTS activation_assets_review_status_check;
+ALTER TABLE activation_assets ADD CONSTRAINT activation_assets_review_status_check CHECK (review_status IN ('pending','accepted','rejected'));
+ALTER TABLE activation_assets ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE activation_assets ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS activation_assets_type_idx ON activation_assets (asset_type);
+
+ALTER TABLE activations ADD COLUMN IF NOT EXISTS shop_rating SMALLINT;
+ALTER TABLE activations DROP CONSTRAINT IF EXISTS activations_shop_rating_check;
+ALTER TABLE activations ADD CONSTRAINT activations_shop_rating_check CHECK (shop_rating BETWEEN 1 AND 5);
+ALTER TABLE activations ADD COLUMN IF NOT EXISTS admin_comment TEXT;
 
 CREATE TABLE IF NOT EXISTS photos (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

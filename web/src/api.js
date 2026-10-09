@@ -118,6 +118,8 @@ export const api = {
   activation: (id) => request(`/activations/${id}`),
   setStatus: (id, status, note) =>
     request(`/activations/${id}/status`, { method: "PATCH", body: { status, note } }),
+  setAdminFeedback: (id, feedback) =>
+    request(`/activations/${id}/admin-feedback`, { method: "PATCH", body: feedback }),
 
   createActivation: (payload, photos) => {
     const form = new FormData();

@@ -1,6 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import {
-  Camera, CheckCircle2, Clock, ChevronRight, Loader2, Package, Store, Target, Plus,
+  Camera, CheckCircle2, Clock, ChevronRight, ChevronDown, Loader2, Package, Store, Target, Plus,
   Image as ImageIcon, RefreshCw, Trash2, X, Check, Users, ClipboardList, BarChart3,
 } from "lucide-react";
 
@@ -586,8 +586,47 @@ export function AdminOverview({ a }) {
 
 
 export function AdminAnalytics({ a }) {
-  const [peopleRole, setPeopleRole] = useState("");
-  const people = (a.byPeople || a.bySales || []).filter((person) => !peopleRole || person.role === peopleRole);
+  const [peopleRole, setPeopleRole] = useState("regional_head");
+  const [expandedPeople, setExpandedPeople] = useState(() => new Set());
+  const people = a.byPeople || a.bySales || [];
+  const childrenByManager = useMemo(() => {
+    const grouped = new Map();
+    people.forEach((person) => {
+      if (!grouped.has(person.managerId)) grouped.set(person.managerId, []);
+      grouped.get(person.managerId).push(person);
+    });
+    grouped.forEach((rows) => rows.sort((left, right) => left.name.localeCompare(right.name)));
+    return grouped;
+  }, [people]);
+  const peopleRoots = people.filter((person) => person.role === peopleRole).sort((left, right) => left.name.localeCompare(right.name));
+  const togglePerson = (id) => setExpandedPeople((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const PersonRow = ({ person, depth = 0 }) => {
+    const children = childrenByManager.get(person.id) || [];
+    const open = expandedPeople.has(person.id);
+    return <>
+      <tr className="border-t border-slate-100 first:border-t-0 hover:bg-slate-50">
+        <td className="px-3 py-3">
+          <div className="flex min-w-0 items-center gap-2" style={{ paddingLeft: `${Math.min(depth, 3) * 22}px` }}>
+            {children.length ? <button type="button" onClick={() => togglePerson(person.id)}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-700">
+              {open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+            </button> : <span className="h-7 w-7 shrink-0" />}
+            <span className="min-w-0"><span className="block truncate font-medium text-slate-900">{person.name}</span><span className="block text-xs text-slate-500">{person.employeeId} · {person.roleLabel || "Salesman"}</span></span>
+          </div>
+        </td>
+        <td className="px-3 py-3 text-slate-600">{[person.region, person.city, person.state].filter(Boolean).join(" · ") || "—"}</td>
+        <td className="px-3 py-3 text-right tabular-nums">{person.teamSize ?? 1}</td>
+        <td className="px-3 py-3 text-right tabular-nums font-medium">{person.target}</td>
+        <td className="px-3 py-3 text-right tabular-nums font-medium text-teal-700">{person.shops}</td>
+        <td className="px-3 py-3 text-right"><PenCell value={person.completion} /></td>
+      </tr>
+      {open ? children.map((child) => <PersonRow key={child.id} person={child} depth={depth + 1}/>) : null}
+    </>;
+  };
   return (
     <div className="space-y-4">
       <PenTable
@@ -624,29 +663,26 @@ export function AdminAnalytics({ a }) {
           { label: "Asset penetration", right: true, render: (r) => <PenCell value={r.assetPen} /> },
         ]}
       />
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <div><h3 className="text-sm font-semibold text-slate-900">Hierarchy performance</h3><p className="text-xs text-slate-500">Open a leader to drill down through their reporting team.</p></div>
         <select value={peopleRole} onChange={(event) => setPeopleRole(event.target.value)} className={`${inputCls} sm:w-56`}>
-          <option value="">All hierarchy levels</option>
-          <option value="regional_head">Regional Heads</option>
-          <option value="city_head">City Heads</option>
-          <option value="team_lead">Team Leads</option>
-          <option value="field">Salesmen</option>
+          <option value="regional_head">Start with Regional Heads</option>
+          <option value="city_head">Start with City Heads</option>
+          <option value="team_lead">Start with Team Leads</option>
+          <option value="field">Show Salesmen</option>
         </select>
       </div>
-      <PenTable
-        head="People performance"
-        rows={people}
-        cols={[
-          { label: "Person", render: (r) => (<span><span className="font-medium text-slate-900">{r.name}</span><span className="block text-xs text-slate-500">{r.employeeId}</span></span>) },
-          { label: "Level", render: (r) => r.roleLabel || "Salesman" },
-          { label: "Reports to", render: (r) => r.reportingManager || "—" },
-          { label: "Scope", render: (r) => [r.region, r.city, r.state].filter(Boolean).join(" · ") || "—" },
-          { label: "Salespeople", right: true, render: (r) => r.teamSize ?? 1 },
-          { label: "Shops activated", right: true, render: (r) => r.shops },
-          { label: "Assets installed", right: true, render: (r) => r.installed },
-          { label: "Completion", right: true, render: (r) => <PenCell value={r.completion} /> },
-        ]}
-      />
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr>
+            <th className="px-3 py-2 font-medium">Person / level</th><th className="px-3 py-2 font-medium">Scope</th>
+            <th className="px-3 py-2 text-right font-medium">Salespeople</th><th className="px-3 py-2 text-right font-medium">Target</th>
+            <th className="px-3 py-2 text-right font-medium">Activated</th><th className="px-3 py-2 text-right font-medium">Completion</th>
+          </tr></thead>
+          <tbody>{peopleRoots.map((person) => <PersonRow key={person.id} person={person}/>)}</tbody>
+        </table></div>
+        {!peopleRoots.length ? <p className="px-4 py-8 text-center text-sm text-slate-500">No employees match the selected geography and hierarchy level.</p> : null}
+      </div>
       <p className="text-xs text-slate-500">Leader rows aggregate the salespeople below them. Salesman targets are based on an equal share of planned shops in their assigned city.</p>
     </div>
   );

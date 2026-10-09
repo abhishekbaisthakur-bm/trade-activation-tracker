@@ -97,6 +97,11 @@ function RecordDetail({ id, onClose, onOpenSalesperson }) {
   const [photos, setPhotos] = useState({});
   const [photoErrors, setPhotoErrors] = useState({});
   const [error, setError] = useState("");
+  const [rating, setRating] = useState("");
+  const [comment, setComment] = useState("");
+  const [assetStatuses, setAssetStatuses] = useState({});
+  const [savingFeedback, setSavingFeedback] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
 
   useEffect(() => {
     let urls = [];
@@ -105,6 +110,9 @@ function RecordDetail({ id, onClose, onOpenSalesperson }) {
       .then(async ({ activation }) => {
         if (!live) return;
         setRecord(activation);
+        setRating(activation.shop_rating || "");
+        setComment(activation.admin_comment || "");
+        setAssetStatuses(Object.fromEntries(activation.assets.map((asset) => [asset.asset_type, asset.review_status || "pending"])));
         for (const a of activation.assets) {
           if (!a.photo_id) continue;
           try {
@@ -126,6 +134,21 @@ function RecordDetail({ id, onClose, onOpenSalesperson }) {
       <span className="text-right font-medium text-slate-900">{value}</span>
     </div>
   );
+
+  const saveFeedback = async () => {
+    setSavingFeedback(true);
+    setError("");
+    setFeedbackMessage("");
+    try {
+      const result = await api.setAdminFeedback(id, { rating: rating || null, comment, assetStatuses });
+      setRecord(result.activation);
+      setFeedbackMessage("Asset decisions, rating and comment saved.");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSavingFeedback(false);
+    }
+  };
 
   return (
     <Modal title={record ? record.code : "Loading"} onClose={onClose} wide>
@@ -193,8 +216,36 @@ function RecordDetail({ id, onClose, onOpenSalesperson }) {
                   <div className="border-t border-slate-100 px-2 py-1 text-xs text-slate-400">
                     {x.captured_at ? `${fmtDate(x.captured_at)} ${fmtTime(x.captured_at)}` : "-"}
                   </div>
+                  <div className="grid grid-cols-2 gap-1 border-t border-slate-100 p-2">
+                    <button type="button" onClick={() => setAssetStatuses((current) => ({ ...current, [x.asset_type]: "accepted" }))}
+                      className={`rounded-md border px-2 py-1 text-xs font-medium ${assetStatuses[x.asset_type] === "accepted" ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 text-slate-600 hover:border-emerald-300"}`}>
+                      Accept
+                    </button>
+                    <button type="button" onClick={() => setAssetStatuses((current) => ({ ...current, [x.asset_type]: "rejected" }))}
+                      className={`rounded-md border px-2 py-1 text-xs font-medium ${assetStatuses[x.asset_type] === "rejected" ? "border-rose-600 bg-rose-600 text-white" : "border-slate-200 text-slate-600 hover:border-rose-300"}`}>
+                      Reject
+                    </button>
+                  </div>
                 </div>
               ))}
+            </div>
+            <div className="mt-4 rounded-xl border border-slate-200 p-4">
+              <h4 className="text-sm font-semibold text-slate-900">Shop feedback for salesperson</h4>
+              <p className="mt-1 text-xs text-slate-500">The rating and comment will be visible to the salesperson on this activation.</p>
+              <div className="mt-3 flex gap-1" aria-label="Shop rating">
+                {[1,2,3,4,5].map((value) => <button key={value} type="button" onClick={() => setRating(value)}
+                  className={`text-2xl ${Number(rating) >= value ? "text-amber-400" : "text-slate-300"}`}
+                  aria-label={`${value} star rating`}>★</button>)}
+                {rating ? <button type="button" className="ml-2 text-xs text-slate-500 hover:underline" onClick={() => setRating("")}>Clear</button> : null}
+              </div>
+              <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3}
+                className={inputCls + " mt-3"} placeholder="Write a comment for the salesperson about this shop" />
+              {feedbackMessage ? <p className="mt-2 text-xs font-medium text-emerald-700">{feedbackMessage}</p> : null}
+              <div className="mt-3 flex justify-end">
+                <Button size="sm" onClick={saveFeedback} disabled={savingFeedback}>
+                  {savingFeedback ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Save feedback
+                </Button>
+              </div>
             </div>
           </div>
         </div>

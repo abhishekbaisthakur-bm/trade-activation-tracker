@@ -513,6 +513,14 @@ function FieldDashboard({ user }) {
                 </div>
                 <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${statusTone(a.status)}`}>{a.status}</span>
               </div>
+              {a.shop_rating || a.admin_comment ? <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-slate-700">
+                {a.shop_rating ? <p className="font-medium text-amber-700">{"★".repeat(a.shop_rating)}{"☆".repeat(5-a.shop_rating)}</p> : null}
+                {a.admin_comment ? <p className="mt-1"><span className="font-medium">Admin comment:</span> {a.admin_comment}</p> : null}
+              </div> : null}
+              {a.accepted_asset_count || a.rejected_asset_count ? <p className="mt-2 text-xs text-slate-500">
+                {a.accepted_asset_count ? <span className="mr-3 text-emerald-700">{a.accepted_asset_count} asset{a.accepted_asset_count === 1 ? "" : "s"} accepted</span> : null}
+                {a.rejected_asset_count ? <span className="text-rose-700">{a.rejected_asset_count} asset{a.rejected_asset_count === 1 ? "" : "s"} rejected</span> : null}
+              </p> : null}
             </Card>
           ))}
         </div>
