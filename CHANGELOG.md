@@ -126,3 +126,8 @@ the exact frontend, API and database code deployed at that point.
 - Send primary-approved activations to the Admin Approvals queue.
 - Reserve final activation approval or rejection for Admins.
 - Show clear awaiting-final-approval status to managers.
+
+# v1.9.1 — Approval tags on Salesman pharmacies
+
+- Show each pharmacy's approval stage inside the Admin Salesman profile.
+- Distinguish manager-pending, Admin-pending, approved and rejected activations.

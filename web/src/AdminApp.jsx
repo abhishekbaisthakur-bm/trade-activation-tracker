@@ -315,7 +315,13 @@ function SalespersonProfile({ user, onClose, onOpenRecord }) {
               onClick={() => onOpenRecord(activation.id)}
               className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-teal-50">
               <span className="min-w-0">
-                <span className="block truncate text-sm font-medium text-slate-900">{activation.pharmacy_name}</span>
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-medium text-slate-900">{activation.pharmacy_name}</span>
+                  {activation.status === "Submitted" ? <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700">Manager approval pending</span> : null}
+                  {activation.status === "Pending Review" ? <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">Admin approval pending</span> : null}
+                  {activation.status === "Approved" ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Approved</span> : null}
+                  {activation.status === "Rejected" ? <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">Rejected</span> : null}
+                </span>
                 <span className="block text-xs text-slate-500">{activation.code} · {activation.city || "City not recorded"}</span>
               </span>
               <span className="shrink-0 text-xs text-slate-500">{fmtDate(activation.occurred_at)}</span>
